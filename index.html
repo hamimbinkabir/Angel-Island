@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Mini GTA Prototype - Fixed Colliders</title>
+
+<style>
+body {
+  margin: 0;
+  overflow: hidden;
+  background: black;
+  font-family: Arial;
+}
+
+#ui {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  color: white;
+  background: rgba(0,0,0,0.5);
+  padding: 10px;
+  border-radius: 8px;
+}
+</style>
+</head>
+
+<body>
+
+<div id="ui">
+<b>Mini GTA Prototype</b><br>
+WASD = Move<br>
+F = Enter/Exit Car
+</div>
+
+<script type="module">
+
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160/build/three.module.js';
+
+/* ================= SCENE ================= */
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x87ceeb);
+
+const camera = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.1, 1000);
+
+const renderer = new THREE.WebGLRenderer({ antialias:true });
+renderer.setSize(innerWidth, innerHeight);
+document.body.appendChild(renderer.domElement);
+
+/* ================= LIGHT ================= */
+scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+
+const sun = new THREE.DirectionalLight(0xffffff, 1);
+sun.position.set(50,100,50);
+scene.add(sun);
+
+/* ================= GROUND ================= */
+const ground = new THREE.Mesh(
+  new THREE.PlaneGeometry(500,500),
+  new THREE.MeshStandardMaterial({ color:0x2e8b57 })
+);
+ground.rotation.x = -Math.PI / 2;
+scene.add(ground);
+
+/* ================= COLLIDERS ================= */
+const colliders = [];
+
+/* ================= BUILDINGS ================= */
+function building(x, z, h) {
+
+  const b = new THREE.Mesh(
+    new THREE.BoxGeometry(10, h, 10),
+    new THREE.MeshStandardMaterial({ color: Math.random() * 0xffffff })
+  );
+
+  b.position.set(x, h / 2, z);
+  scene.add(b);
+
+  /* ✅ FIX: trimmed collider (slightly smaller than visual mesh) */
+  const box = new THREE.Box3().setFromObject(b);
+
+  box.min.x += 0.4;
+  box.max.x -= 0.4;
+
+  box.min.z += 0.4;
+  box.max.z -= 0.4;
+
+  colliders.push(box);
+}
+
+/* city generation */
+for (let i = -100; i <= 100; i += 20) {
+  for (let j = -100; j <= 100; j += 20) {
+    if (Math.abs(i) < 15 || Math.abs(j) < 15) continue;
+    building(i, j, 5 + Math.random() * 25);
+  }
+}
+
+/* ================= PLAYER ================= */
+const player = new THREE.Group();
+
+/* body */
+const torso = new THREE.Mesh(
+  new THREE.BoxGeometry(0.9,1.2,0.5),
+  new THREE.MeshStandardMaterial({ color:0x1e4fff })
+);
+torso.position.y = 1;
+player.add(torso);
+
+/* head */
+const head = new THREE.Mesh(
+  new THREE.BoxGeometry(0.6,0.6,0.6),
+  new THREE.MeshStandardMaterial({ color:0xffccaa })
+);
+head.position.y = 2;
+player.add(head);
+
+/* limbs */
+const armMat = new THREE.MeshStandardMaterial({ color:0xffccaa });
+const armGeo = new THREE.BoxGeometry(0.25,0.9,0.25);
+
+const armL = new THREE.Mesh(armGeo,armMat);
+const armR = new THREE.Mesh(armGeo,armMat);
+
+armL.position.set(-0.65,1.1,0);
+armR.position.set(0.65,1.1,0);
+
+player.add(armL);
+player.add(armR);
+
+const handGeo = new THREE.BoxGeometry(0.18,0.18,0.18);
+
+const handL = new THREE.Mesh(handGeo,armMat);
+const handR = new THREE.Mesh(handGeo,armMat);
+
+handL.position.set(-0.65,0.5,0);
+handR.position.set(0.65,0.5,0);
+
+player.add(handL);
+player.add(handR);
+
+const legMat = new THREE.MeshStandardMaterial({ color:0x222 });
+const legGeo = new THREE.BoxGeometry(0.3,0.9,0.3);
+
+const leg1 = new THREE.Mesh(legGeo,legMat);
+const leg2 = new THREE.Mesh(legGeo,legMat);
+
+leg1.position.set(-0.2,0.45,0);
+leg2.position.set(0.2,0.45,0);
+
+player.add(leg1);
+player.add(leg2);
+
+scene.add(player);
+
+/* ================= CAR ================= */
+const car = new THREE.Group();
+
+const body = new THREE.Mesh(
+  new THREE.BoxGeometry(2,0.6,4),
+  new THREE.MeshStandardMaterial({ color:0xff0000 })
+);
+body.position.y = 0.6;
+car.add(body);
+
+car.position.set(5,0,5);
+scene.add(car);
+
+/* wheels */
+const wheelGeo = new THREE.CylinderGeometry(0.4,0.4,0.3,16);
+const wheelMat = new THREE.MeshStandardMaterial({ color:0x111 });
+
+function wheel(x,z){
+  const w = new THREE.Mesh(wheelGeo,wheelMat);
+  w.rotation.z = Math.PI/2;
+  w.position.set(x,0.3,z);
+  car.add(w);
+}
+
+wheel(-1,1.5);
+wheel(1,1.5);
+wheel(-1,-1.5);
+wheel(1,-1.5);
+
+/* ================= INPUT ================= */
+const keys = {};
+let inCar = false;
+
+window.addEventListener("keydown",(e)=>{
+  keys[e.key.toLowerCase()] = true;
+
+  if(e.key.toLowerCase()==="f"){
+    const d = player.position.distanceTo(car.position);
+
+    if(!inCar && d < 5){
+      inCar = true;
+      player.visible = false;
+    } else if(inCar){
+      inCar = false;
+      player.visible = true;
+      player.position.copy(car.position);
+    }
+  }
+});
+
+window.addEventListener("keyup",(e)=>{
+  keys[e.key.toLowerCase()] = false;
+});
+
+/* ================= COLLISION CHECK ================= */
+function check(x, z) {
+
+  const playerBox = new THREE.Box3(
+    new THREE.Vector3(x - 0.5, 0, z - 0.5),
+    new THREE.Vector3(x + 0.5, 2, z + 0.5)
+  );
+
+  for (const box of colliders) {
+    const b = box.clone();
+
+    b.min.y = -10;
+    b.max.y = 10;
+
+    if (b.intersectsBox(playerBox)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/* ================= STATE ================= */
+let playerRot = 0;
+let carRot = 0;
+let carSpeed = 0;
+
+/* ================= PLAYER ================= */
+function updatePlayer(){
+
+  let move = 0;
+  let turn = 0;
+
+  if(keys.w) move = 1;
+  if(keys.s) move = -1;
+
+  if(keys.a) turn = 1;
+  if(keys.d) turn = -1;
+
+  playerRot += turn * 0.05;
+  player.rotation.y = playerRot;
+
+  const t = Date.now() * 0.01;
+
+  const nx = player.position.x + Math.sin(playerRot) * move * 0.15;
+  const nz = player.position.z + Math.cos(playerRot) * move * 0.15;
+
+  if(move !== 0 && !check(nx,nz)){
+    player.position.set(nx,0,nz);
+
+    leg1.position.z = Math.sin(t)*0.05;
+    leg2.position.z = -Math.sin(t)*0.05;
+
+    armL.rotation.x = Math.sin(t)*0.4;
+    armR.rotation.x = -Math.sin(t)*0.4;
+
+  } else {
+
+    leg1.position.z = 0;
+    leg2.position.z = 0;
+
+    armL.rotation.x = 0;
+    armR.rotation.x = 0;
+  }
+}
+
+/* ================= CAR ================= */
+function updateCar(){
+
+  if(keys.w) carSpeed += 0.01;
+  if(keys.s) carSpeed -= 0.01;
+
+  carSpeed *= 0.98;
+  carSpeed = Math.max(-0.25, Math.min(0.5, carSpeed));
+
+  if(Math.abs(carSpeed) > 0.01){
+    if(keys.a) carRot += 0.03;
+    if(keys.d) carRot -= 0.03;
+  }
+
+  car.rotation.y = carRot;
+
+  const nx = car.position.x + Math.sin(carRot)*carSpeed;
+  const nz = car.position.z + Math.cos(carRot)*carSpeed;
+
+  if(!check(nx,nz)){
+    car.position.set(nx,0,nz);
+  }
+}
+
+/* ================= CAMERA ================= */
+function cam(target){
+
+  const dist = 12;
+  const height = 7;
+
+  const angle = inCar ? carRot : playerRot;
+
+  const ox = Math.sin(angle)*dist;
+  const oz = Math.cos(angle)*dist;
+
+  const desired = new THREE.Vector3(
+    target.position.x - ox,
+    target.position.y + height,
+    target.position.z - oz
+  );
+
+  camera.position.lerp(desired, 0.08);
+  camera.lookAt(target.position);
+}
+
+/* ================= LOOP ================= */
+function animate(){
+  requestAnimationFrame(animate);
+
+  if(inCar){
+    updateCar();
+    cam(car);
+  } else {
+    updatePlayer();
+    cam(player);
+  }
+
+  renderer.render(scene,camera);
+}
+
+animate();
+
+/* ================= RESIZE ================= */
+addEventListener("resize",()=>{
+  camera.aspect=innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);
+});
+
+</script>
+
+</body>
+</html>
