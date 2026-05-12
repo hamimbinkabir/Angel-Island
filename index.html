@@ -3,14 +3,14 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Mini GTA Prototype - Refined Characters</title>
+<title>Mini City Prototype</title>
 
 <style>
 body {
   margin: 0;
   overflow: hidden;
   background: black;
-  font-family: Arial;
+  font-family: 'Inter', Arial, sans-serif;
 }
 
 #ui {
@@ -18,26 +18,31 @@ body {
   top: 10px;
   left: 10px;
   color: white;
-  background: rgba(0,0,0,0.5);
-  padding: 10px;
-  border-radius: 8px;
+  background: rgba(0,0,0,0.6);
+  backdrop-filter: blur(4px);
+  padding: 15px;
+  border-radius: 12px;
+  pointer-events: none;
+  border: 1px solid rgba(255,255,255,0.1);
 }
 
 #minimap {
   position: absolute;
-  bottom: 10px;
-  right: 10px;
-  width: 150px;
-  height: 150px;
+  bottom: 20px;
+  right: 20px;
+  width: 160px;
+  height: 160px;
   background: rgba(0,0,0,0.8);
   border: 2px solid #00ff00;
-  border-radius: 4px;
+  border-radius: 8px;
+  box-shadow: 0 0 15px rgba(0,255,0,0.2);
 }
 
 #minimap-canvas {
   width: 100%;
   height: 100%;
   display: block;
+  border-radius: 6px;
 }
 </style>
 </head>
@@ -45,9 +50,11 @@ body {
 <body>
 
 <div id="ui">
-<b>Mini GTA Prototype</b><br>
+<b style="font-size: 1.1em; color: #00ff00;">Mini GTA Prototype</b><br>
+<div style="margin-top: 5px; opacity: 0.9; font-size: 0.9em;">
 WASD = Move<br>
 F = Enter/Exit Car
+</div>
 </div>
 
 <div id="minimap">
@@ -55,22 +62,27 @@ F = Enter/Exit Car
 </div>
 
 <script type="module">
-
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160/build/three.module.js';
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x87ceeb);
 scene.fog = new THREE.Fog(0x87ceeb, 10, 150);
 
-const camera = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.1, 1000);
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
 
 const renderer = new THREE.WebGLRenderer({ antialias:true });
-renderer.setSize(innerWidth, innerHeight);
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
 document.body.appendChild(renderer.domElement);
 
 scene.add(new THREE.AmbientLight(0xffffff, 0.6));
-const sun = new THREE.DirectionalLight(0xffffff, 1);
+const sun = new THREE.DirectionalLight(0xffffff, 1.2);
 sun.position.set(50,100,50);
+sun.castShadow = true;
+sun.shadow.camera.left = -100;
+sun.shadow.camera.right = 100;
+sun.shadow.camera.top = 100;
+sun.shadow.camera.bottom = -100;
 scene.add(sun);
 
 const ground = new THREE.Mesh(
@@ -78,6 +90,7 @@ const ground = new THREE.Mesh(
   new THREE.MeshStandardMaterial({ color:0x2e8b57 })
 );
 ground.rotation.x = -Math.PI / 2;
+ground.receiveShadow = true;
 scene.add(ground);
 
 const roadMaterial = new THREE.MeshStandardMaterial({ color: 0x1a1a1a });
@@ -85,38 +98,102 @@ for(let z = -120; z <= 120; z += 40) {
   const roadH = new THREE.Mesh(new THREE.PlaneGeometry(520, 12), roadMaterial);
   roadH.position.set(0, 0.01, z);
   roadH.rotation.x = -Math.PI / 2;
+  roadH.receiveShadow = true;
   scene.add(roadH);
 }
 for(let x = -120; x <= 120; x += 40) {
   const roadV = new THREE.Mesh(new THREE.PlaneGeometry(12, 520), roadMaterial);
   roadV.position.set(x, 0.01, 0);
   roadV.rotation.x = -Math.PI / 2;
+  roadV.receiveShadow = true;
   scene.add(roadV);
 }
 
 const colliders = [];
-const buildingColors = [0xFF6B6B, 0x4ECDC4, 0xFFE66D, 0x95E1D3, 0xF38181, 0xAA96DA, 0xFCBAAD, 0xB4E7FF];
 
-function building(x, z, h, width = 10, depth = 10) {
-  const color = buildingColors[Math.floor(Math.random() * buildingColors.length)];
-  const b = new THREE.Mesh(
-    new THREE.BoxGeometry(width, h, depth),
-    new THREE.MeshStandardMaterial({ color: color })
-  );
+function createBuildingTexture(baseColor) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 256; canvas.height = 512;
+    const ctx = canvas.getContext('2d');
+    const colorHex = '#' + baseColor.toString(16).padStart(6, '0');
+    
+    ctx.fillStyle = colorHex;
+    ctx.fillRect(0, 0, 256, 512);
+
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
+    const rows = 12; const cols = 4;
+    const padding = 15;
+    const winW = (256 - (padding * (cols + 1))) / cols;
+    const winH = (512 - (padding * (rows + 1))) / rows;
+
+    for(let r=0; r<rows; r++) {
+        for(let c=0; c<cols; c++) {
+            ctx.fillStyle = Math.random() > 0.9 ? '#fffca1' : '#1a1a1a';
+            ctx.fillRect(padding + c*(winW+padding), padding + r*(winH+padding), winW, winH);
+        }
+        ctx.strokeStyle = 'rgba(0,0,0,0.4)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(0, r*(winH+padding) + winH + padding/2);
+        ctx.lineTo(256, r*(winH+padding) + winH + padding/2);
+        ctx.stroke();
+    }
+    
+    ctx.fillStyle = '#111';
+    ctx.fillRect(100, 475, 56, 37); // Door
+
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    return tex;
+}
+
+function building(x, z, h, width = 12, depth = 12) {
+  // UPDATED: Expanded architectural color palette for variety
+  const colors = [
+    0x777777, 0x888888, 0x666677, // Classic Concrete Grays
+    0x5a4d41, 0x8b5a2b, 0x9a7d65, // Warm Earth/Brick Tones
+    0x4a5a6a, 0x7c8a99, 0x2c3e50, // Modern Blue/Glass Tones
+    0xdddddd, 0x444444, 0xb87333  // Ivory, Slate, and Copper
+  ];
+  const color = colors[Math.floor(Math.random() * colors.length)];
+  
+  const tex = createBuildingTexture(color);
+  const material = new THREE.MeshStandardMaterial({ map: tex });
+  const b = new THREE.Mesh(new THREE.BoxGeometry(width, h, depth), material);
   b.position.set(x, h / 2, z);
+  b.castShadow = true; b.receiveShadow = true;
   scene.add(b);
   const box = new THREE.Box3().setFromObject(b);
-  box.min.x += 0.4; box.max.x -= 0.4;
-  box.min.z += 0.4; box.max.z -= 0.4;
   colliders.push(box);
 }
 
+function createTree(x, z) {
+    const group = new THREE.Group();
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 2), new THREE.MeshStandardMaterial({color: 0x4d2d1e}));
+    trunk.position.y = 1; trunk.castShadow = true; group.add(trunk);
+    const leaves = new THREE.Mesh(new THREE.SphereGeometry(1.2, 8, 8), new THREE.MeshStandardMaterial({color: 0x2e5a27}));
+    leaves.position.y = 2.5; leaves.castShadow = true; group.add(leaves);
+    group.position.set(x, 0, z); scene.add(group);
+}
+
+function createStreetLamp(x, z, rot) {
+    const group = new THREE.Group();
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 4), new THREE.MeshStandardMaterial({color: 0x333333}));
+    pole.position.y = 2; group.add(pole);
+    const head = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.2, 0.8), new THREE.MeshStandardMaterial({color: 0x222222}));
+    head.position.set(0, 4, 0.4); group.add(head);
+    const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.15), new THREE.MeshStandardMaterial({color: 0xffffcc, emissive: 0xffffcc, emissiveIntensity: 1}));
+    bulb.position.set(0, 3.8, 0.6); group.add(bulb);
+    group.position.set(x, 0, z); group.rotation.y = rot; scene.add(group);
+}
+
+// Generate Layout
 for (let roadX = -120; roadX < 120; roadX += 40) {
   for (let roadZ = -120; roadZ < 120; roadZ += 40) {
-    const plotCenterX = roadX + 20;
-    const plotCenterZ = roadZ + 20;
-    if(Math.random() > 0.5) building(plotCenterX - 4, plotCenterZ - 4, 8 + Math.random() * 20, 8, 8);
-    else building(plotCenterX, plotCenterZ, 5 + Math.random() * 15, 12, 12);
+    const plotX = roadX + 20; const plotZ = roadZ + 20;
+    building(plotX, plotZ, 15 + Math.random() * 20, 18, 18);
+    createTree(roadX + 8, roadZ + 8);
+    createStreetLamp(roadX + 6, roadZ + 20, Math.PI/2);
   }
 }
 
@@ -136,107 +213,74 @@ function createHumanoidModel(options = {}) {
     const shirtMat = new THREE.MeshStandardMaterial({ color: shirtColor });
     const pantMat = new THREE.MeshStandardMaterial({ color: pantColor });
     const hairMat = new THREE.MeshStandardMaterial({ color: hairColor });
-    const featureMat = new THREE.MeshStandardMaterial({ color: 0x000000 }); // Black for lines
+    const featureMat = new THREE.MeshStandardMaterial({ color: 0x000000 });
 
-    // Torso
     const torsoHeight = isFemale ? 0.7 : 0.8;
     const torso = new THREE.Mesh(new THREE.BoxGeometry(0.6, torsoHeight, 0.3), shirtMat);
     torso.position.y = 1.1;
+    torso.castShadow = true;
     group.add(torso);
 
-    // Head
     const head = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.4, 0.4), skinMat);
     head.position.y = (torsoHeight/2) + 0.22;
     torso.add(head);
 
-    // Eyes (Two horizontal lines)
     const eyeGeo = new THREE.BoxGeometry(0.08, 0.02, 0.01);
     const eyeL = new THREE.Mesh(eyeGeo, featureMat);
     eyeL.position.set(-0.1, 0.05, 0.201);
     head.add(eyeL);
-
     const eyeR = eyeL.clone();
     eyeR.position.x = 0.1;
     head.add(eyeR);
 
-    // Lip (One horizontal line)
     const lip = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.02, 0.01), featureMat);
     lip.position.set(0, -0.1, 0.201);
     head.add(lip);
 
-    // Improved Hair Group (Full Wrap Around)
     const hairGroup = new THREE.Group();
     head.add(hairGroup);
-
     const hairTop = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.15, 0.44), hairMat);
     hairTop.position.y = 0.18;
     hairGroup.add(hairTop);
-
     const backHairHeight = isFemale ? 0.5 : 0.25;
     const hairBack = new THREE.Mesh(new THREE.BoxGeometry(0.44, backHairHeight, 0.15), hairMat);
     hairBack.position.set(0, 0.18 - (backHairHeight/2), -0.15);
     hairGroup.add(hairBack);
-
     const sideHairHeight = isFemale ? 0.5 : 0.2;
     const hairSideL = new THREE.Mesh(new THREE.BoxGeometry(0.05, sideHairHeight, 0.3), hairMat);
     hairSideL.position.set(-0.2, 0.18 - (sideHairHeight/2), 0.05);
     hairGroup.add(hairSideL);
-    
     const hairSideR = hairSideL.clone();
     hairSideR.position.x = 0.2;
     hairGroup.add(hairSideR);
 
-    // Beard (Kept for NPC variety, but disabled for protagonist via options)
     if (hasBeard) {
         const beard = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.12, 0.12), hairMat);
         beard.position.set(0, -0.12, 0.16);
         head.add(beard);
     }
 
-    // Legs
     const legLen = isShortPant ? 0.55 : 0.75;
     const legGeo = new THREE.BoxGeometry(0.22, legLen, 0.22);
     const legL = new THREE.Mesh(legGeo, pantMat);
     const legR = legL.clone();
     legL.position.set(-0.16, - (torsoHeight/2) - (legLen/2), 0);
     legR.position.set(0.16, - (torsoHeight/2) - (legLen/2), 0);
-    torso.add(legL);
-    torso.add(legR);
+    torso.add(legL); torso.add(legR);
 
-    // Shoes and Ankle logic
     const shoeMat = new THREE.MeshStandardMaterial({color: 0x111111});
-    if (isShortPant) {
-        const ankleL = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 0.2), skinMat);
-        const ankleR = ankleL.clone();
-        ankleL.position.y = - (legLen/2) - 0.1;
-        ankleR.position.y = - (legLen/2) - 0.1;
-        legL.add(ankleL);
-        legR.add(ankleR);
-        
-        const shoe = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.1, 0.3), shoeMat);
-        shoe.position.set(0, -0.1, 0.05);
-        ankleL.add(shoe);
-        ankleR.add(shoe.clone());
-    } else {
-        const shoe = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.15, 0.3), shoeMat);
-        shoe.position.set(0, - (legLen/2) - 0.05, 0.05);
-        legL.add(shoe);
-        legR.add(shoe.clone());
-    }
+    const shoe = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.12, 0.3), shoeMat);
+    shoe.position.set(0, - (legLen/2) - 0.05, 0.05);
+    legL.add(shoe); legR.add(shoe.clone());
 
-    // Arms
     const armGeo = new THREE.BoxGeometry(0.18, 0.65, 0.18);
     const armL = new THREE.Mesh(armGeo, skinMat);
     const armR = armL.clone();
     const sleeve = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.3, 0.2), shirtMat);
     sleeve.position.y = 0.18;
-    armL.add(sleeve);
-    armR.add(sleeve.clone());
-
-    armL.position.set(-0.42, 0, 0);
-    armR.position.set(0.42, 0, 0);
-    torso.add(armL);
-    torso.add(armR);
+    armL.add(sleeve); armR.add(sleeve.clone());
+    armL.position.set(-0.42, 0, 0); armR.position.set(0.42, 0, 0);
+    torso.add(armL); torso.add(armR);
 
     return { group, torso, armL, armR, legL, legR };
 }
@@ -280,7 +324,7 @@ class NPC {
     const nx = this.position.x + Math.sin(this.rotation) * this.speed;
     const nz = this.position.z + Math.cos(this.rotation) * this.speed;
 
-    if(nx > -240 && nx < 240 && nz > -240 && nz < 240 && !check(nx, nz)) {
+    if(nx > -240 && nx < 240 && nz > -240 && nz < 240 && !check(nx, nz, 0.5)) {
       this.position.x = nx;
       this.position.z = nz;
     } else { this.targetRotation += Math.PI / 2; }
@@ -298,74 +342,46 @@ class NPC {
 
 for(let i = 0; i < 30; i++) npcs.push(new NPC((Math.random() - 0.5) * 150, (Math.random() - 0.5) * 150));
 
-const protagonistModel = createHumanoidModel({
-    skinColor: 0xffccaa,
-    shirtColor: 0x1e4fff, 
-    pantColor: 0x222222,
-    hasBeard: false, // REMOVED BEARD
-    isShortPant: true // Cuffed ankle pants
-});
-
-const player = protagonistModel.group;
-const pLegL = protagonistModel.legL;
-const pLegR = protagonistModel.legR;
-const pArmL = protagonistModel.armL;
-const pArmR = protagonistModel.armR;
+const protagonist = createHumanoidModel({ shirtColor: 0x1e4fff, isShortPant: true });
+const player = protagonist.group;
+player.position.set(5, 0, 10);
 scene.add(player);
 
 const car = new THREE.Group();
 const carBodyMat = new THREE.MeshStandardMaterial({ color: 0xff0000, metalness: 0.6, roughness: 0.2 });
-const windowMat = new THREE.MeshStandardMaterial({ color: 0x336699, transparent: true, opacity: 0.7 });
-const wheelMat = new THREE.MeshStandardMaterial({ color: 0x111111 });
-const detailMat = new THREE.MeshStandardMaterial({ color: 0xcccccc });
-
 const carMainBody = new THREE.Mesh(new THREE.BoxGeometry(2, 0.5, 4.2), carBodyMat);
-carMainBody.position.y = 0.5;
-car.add(carMainBody);
+carMainBody.position.y = 0.5; carMainBody.castShadow = true; car.add(carMainBody);
 
 const carCabin = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.6, 2.2), carBodyMat);
-carCabin.position.set(0, 1, -0.2);
-car.add(carCabin);
+carCabin.position.set(0, 1, -0.2); car.add(carCabin);
 
+const windowMat = new THREE.MeshStandardMaterial({ color: 0x336699, transparent: true, opacity: 0.7 });
 const windshield = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.5, 0.1), windowMat);
-windshield.position.set(0, 1, 0.9);
-windshield.rotation.x = -0.3;
-car.add(windshield);
+windshield.position.set(0, 1, 0.9); windshield.rotation.x = -0.3; car.add(windshield);
 
-const backWindow = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.5, 0.1), windowMat);
-backWindow.position.set(0, 1, -1.3);
-backWindow.rotation.x = 0.3;
-car.add(backWindow);
+const backGlass = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.5, 0.1), windowMat);
+backGlass.position.set(0, 1, -1.3); backGlass.rotation.x = 0.3; car.add(backGlass);
 
-const lightGeo = new THREE.BoxGeometry(0.4, 0.2, 0.1);
-const headLightL = new THREE.Mesh(lightGeo, new THREE.MeshStandardMaterial({ color: 0xffffcc, emissive: 0xffffcc }));
-headLightL.position.set(-0.7, 0.5, 2.1);
-car.add(headLightL);
-const headLightR = headLightL.clone();
-headLightR.position.x = 0.7;
-car.add(headLightR);
+const headL = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.2, 0.1), new THREE.MeshStandardMaterial({ color: 0xffffcc, emissive: 0xffffcc }));
+headL.position.set(0.7, 0.5, 2.1); car.add(headL);
+const headR = headL.clone(); headR.position.x = -0.7; car.add(headR);
 
-// RESTORED TAILLIGHTS
-const tailLightL = new THREE.Mesh(lightGeo, new THREE.MeshStandardMaterial({ color: 0xaa0000, emissive: 0x660000 }));
-tailLightL.position.set(-0.7, 0.5, -2.1);
-car.add(tailLightL);
-const tailLightR = tailLightL.clone();
-tailLightR.position.x = 0.7;
-car.add(tailLightR);
+const brakeL = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.2, 0.1), new THREE.MeshStandardMaterial({ color: 0x880000, emissive: 0xff0000, emissiveIntensity: 0.5 }));
+brakeL.position.set(0.65, 0.5, -2.1); car.add(brakeL);
+const brakeR = brakeL.clone(); brakeR.position.x = -0.65; car.add(brakeR);
 
-function addDetailedWheel(x, z) {
-  const wGroup = new THREE.Group();
-  const tire = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 0.4, 16), wheelMat);
-  const rim = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.42, 16), detailMat);
-  wGroup.add(tire); wGroup.add(rim);
-  wGroup.rotation.z = Math.PI / 2;
-  wGroup.position.set(x, 0.4, z);
-  car.add(wGroup);
+function addWheel(x, z) {
+  const wheelGroup = new THREE.Group();
+  const tire = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 0.4, 16), new THREE.MeshStandardMaterial({color: 0x111111}));
+  tire.rotation.z = Math.PI / 2;
+  wheelGroup.add(tire);
+  const rim = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 0.42, 8), new THREE.MeshStandardMaterial({color: 0x888888, metalness: 0.8}));
+  rim.rotation.z = Math.PI / 2;
+  wheelGroup.add(rim);
+  wheelGroup.position.set(x, 0.4, z); car.add(wheelGroup);
 }
-addDetailedWheel(-1.1, 1.3); addDetailedWheel(1.1, 1.3);
-addDetailedWheel(-1.1, -1.3); addDetailedWheel(1.1, -1.3);
-
-car.position.set(5, 0, 5);
+addWheel(-1.1, 1.3); addWheel(1.1, 1.3); addWheel(-1.1, -1.3); addWheel(1.1, -1.3);
+car.position.set(0, 0, 10);
 scene.add(car);
 
 const keys = {};
@@ -375,13 +391,13 @@ window.addEventListener("keydown", (e) => {
   if(e.key.toLowerCase()==="f"){
     const d = player.position.distanceTo(car.position);
     if(!inCar && d < 5){ inCar = true; player.visible = false; }
-    else if(inCar){ inCar = false; player.visible = true; player.position.copy(car.position); }
+    else if(inCar){ inCar = false; player.visible = true; player.position.set(car.position.x + 2, 0, car.position.z); }
   }
 });
 window.addEventListener("keyup", (e) => keys[e.key.toLowerCase()] = false);
 
-function check(x, z) {
-  const box = new THREE.Box3(new THREE.Vector3(x-0.4, 0, z-0.4), new THREE.Vector3(x+0.4, 2, z+0.4));
+function check(x, z, padding = 0.8) {
+  const box = new THREE.Box3(new THREE.Vector3(x-padding, 0, z-padding), new THREE.Vector3(x+padding, 2, z+padding));
   for (const c of colliders) { if (c.intersectsBox(box)) return true; }
   return false;
 }
@@ -394,33 +410,37 @@ function updatePlayer() {
   player.rotation.y = playerRot;
   const nx = player.position.x + Math.sin(playerRot) * move * 0.15;
   const nz = player.position.z + Math.cos(playerRot) * move * 0.15;
-  if(move !== 0 && !check(nx, nz)) {
+  if(move !== 0 && !check(nx, nz, 0.4)) {
     player.position.set(nx, 0, nz);
-    const swing = Math.sin(Date.now() * 0.01) * 0.5;
-    pLegL.rotation.x = swing; pLegR.rotation.x = -swing;
-    pArmL.rotation.x = -swing; pArmR.rotation.x = swing;
+    const walkVal = Date.now() * 0.01;
+    const swing = Math.sin(walkVal) * 0.5;
+    protagonist.legL.rotation.x = swing; protagonist.legR.rotation.x = -swing;
+    protagonist.armL.rotation.x = -swing; protagonist.armR.rotation.x = swing;
+    player.position.y = Math.abs(Math.cos(walkVal)) * 0.05;
   } else {
-    pLegL.rotation.x = 0; pLegR.rotation.x = 0;
-    pArmL.rotation.x = 0; pArmR.rotation.x = 0;
+    protagonist.legL.rotation.x = 0; protagonist.legR.rotation.x = 0;
+    protagonist.armL.rotation.x = 0; protagonist.armR.rotation.x = 0;
+    player.position.y = 0;
   }
 }
 
 function updateCar() {
-  carSpeed += (keys.w ? 0.01 : keys.s ? -0.01 : 0);
+  carSpeed += (keys.w ? 0.012 : keys.s ? -0.012 : 0);
   carSpeed *= 0.98;
-  if(Math.abs(carSpeed) > 0.01) carRot += (keys.a ? 0.03 : keys.d ? -0.03 : 0);
+  if(Math.abs(carSpeed) > 0.01) carRot += (keys.a ? 0.035 : keys.d ? -0.035 : 0) * (carSpeed > 0 ? 1 : -1);
   car.rotation.y = carRot;
   const nx = car.position.x + Math.sin(carRot) * carSpeed;
   const nz = car.position.z + Math.cos(carRot) * carSpeed;
-  if(!check(nx, nz)) car.position.set(nx, 0, nz);
+  if(!check(nx, nz, 1.1)) car.position.set(nx, 0, nz);
+  else carSpeed *= -0.5;
 }
 
 function cam(target) {
-  const dist = 12, height = 7;
   const angle = inCar ? carRot : playerRot;
-  const desired = new THREE.Vector3(target.position.x - Math.sin(angle)*dist, target.position.y + height, target.position.z - Math.cos(angle)*dist);
+  const dist = inCar ? 14 : 12;
+  const desired = new THREE.Vector3(target.position.x - Math.sin(angle)*dist, target.position.y + 7, target.position.z - Math.cos(angle)*dist);
   camera.position.lerp(desired, 0.1);
-  camera.lookAt(target.position);
+  camera.lookAt(target.position.x, target.position.y + 1, target.position.z);
 }
 
 const minimapCanvas = document.getElementById('minimap-canvas');
@@ -428,8 +448,9 @@ const minimapCtx = minimapCanvas.getContext('2d');
 function drawMinimap() {
   minimapCtx.fillStyle = '#1a1a1a';
   minimapCtx.fillRect(0, 0, 150, 150);
+  const target = inCar ? car : player;
   minimapCtx.fillStyle = '#00ff00';
-  minimapCtx.fillRect((player.position.x/500 + 0.5)*150, (player.position.z/500+0.5)*150, 4, 4);
+  minimapCtx.fillRect((target.position.x/500 + 0.5)*150-2, (target.position.z/500+0.5)*150-2, 4, 4);
 }
 
 function animate() {
@@ -439,12 +460,15 @@ function animate() {
   drawMinimap();
   renderer.render(scene, camera);
 }
-animate();
 
-addEventListener("resize", () => {
-  camera.aspect = innerWidth / innerHeight;
+window.onload = () => {
+  animate();
+};
+
+window.addEventListener("resize", () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
-  renderer.setSize(innerWidth, innerHeight);
+  renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
 </script>
