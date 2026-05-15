@@ -49,7 +49,7 @@
                 HEALTH: <span id="health-val">100</span>
             </div>
             <div class="mt-2 text-xs font-bold opacity-80 uppercase tracking-widest">
-                W: Move | AD: Rotate | S: Flip View <br> F: Snatch Car | R: Draw Weapon | Ctrl/Num0: Shoot
+                W: Move | AD: Rotate | Space: Jump <br> F: Snatch Car | R: Draw Weapon | Ctrl/Num0: Shoot
             </div>
         </div>
         
@@ -58,7 +58,13 @@
         </div>
     </div>
 
-    <div class="flex justify-end">
+    <div class="flex justify-end items-end gap-6">
+        <!-- NEW: Car UI -->
+        <div id="car-ui" class="hidden hud-glass px-5 py-3 rounded-xl text-right mb-2">
+            <div class="text-2xl font-black text-cyan-400 italic tracking-widest drop-shadow">SPEED: <span id="speed-val">0</span><span class="text-sm font-bold text-cyan-200 ml-1">MPH</span></div>
+            <div id="car-health-ui" class="text-xl font-bold text-orange-400 mt-1 drop-shadow">CAR: <span id="car-health-val">100%</span></div>
+        </div>
+        
         <div class="hud-glass w-40 h-40 rounded-full overflow-hidden border-4 border-white/20 relative shadow-2xl">
             <canvas id="minimap-canvas" width="160" height="160"></canvas>
             <div class="absolute inset-0 flex items-center justify-center">
@@ -98,11 +104,13 @@ scene.add(sun);
 const colliders = [];
 const traffic = [];
 const npcs = [];
+const explosions = []; // NEW: Explosion Tracker
 let activeCar = null;
 let playerNearCar = null;
 
 // Initialize car colors early so they can be accessed by the parking lot generator
-const carColors = [0xff0066, 0x00ccff, 0xffcc00, 0x33cc33, 0xffffff, 0x222222, 0x8822ff];
+// FIX: Removed black (0x222222) and replaced with orange (0xff6600) for low-vision friendliness
+const carColors = [0xff0066, 0x00ccff, 0xffcc00, 0x33cc33, 0xffffff, 0xff6600, 0x8822ff];
 
 function createBuildingTexture(baseColor) {
     const canvas = document.createElement('canvas');
@@ -123,6 +131,33 @@ function createBuildingTexture(baseColor) {
     }
     const tex = new THREE.CanvasTexture(canvas);
     tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    return tex;
+}
+
+// NEW: Car Wash Sign Texture
+function createCarWashTexture() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 512; canvas.height = 128;
+    const ctx = canvas.getContext('2d');
+    
+    ctx.fillStyle = '#0f172a'; ctx.fillRect(0, 0, 512, 128); // Dark backing
+    ctx.fillStyle = '#06b6d4'; ctx.fillRect(5, 5, 502, 118); // Cyan rim
+    ctx.fillStyle = '#0f172a'; ctx.fillRect(10, 10, 492, 108);
+
+    ctx.fillStyle = '#ec4899'; // Pink text
+    ctx.font = '900 64px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('CAR WASH', 256, 64);
+
+    // Bubble graphics
+    ctx.fillStyle = '#bae6fd';
+    ctx.beginPath(); ctx.arc(60, 40, 12, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(90, 80, 18, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(450, 50, 15, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(420, 90, 10, 0, Math.PI*2); ctx.fill();
+
+    const tex = new THREE.CanvasTexture(canvas);
     return tex;
 }
 
@@ -154,6 +189,38 @@ function createClinicTexture() {
     return tex;
 }
 
+// NEW: Police Station Texture with "POLICE" text
+function createPoliceTexture() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 256; canvas.height = 256;
+    const ctx = canvas.getContext('2d');
+    
+    ctx.fillStyle = '#e2e8f0'; 
+    ctx.fillRect(0, 0, 256, 256);
+    
+    // Write POLICE
+    ctx.fillStyle = '#1d4ed8';
+    ctx.font = '900 44px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('POLICE', 128, 48);
+
+    // Add windows with security bars
+    ctx.fillStyle = '#0f172a';
+    for(let r=0; r<4; r++) {
+        for(let c=0; c<4; c++) {
+            ctx.fillRect(24 + c*55, 75 + r*40, 40, 25);
+            // Draw a single bar down the middle of each window
+            ctx.fillStyle = '#94a3b8';
+            ctx.fillRect(42 + c*55, 75 + r*40, 4, 25);
+            ctx.fillStyle = '#0f172a';
+        }
+    }
+
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    return tex;
+}
+
 // NEW: Helper for Trees & Bushes
 function createTree(x, z, isBush = false) {
     const group = new THREE.Group();
@@ -170,22 +237,6 @@ function createTree(x, z, isBush = false) {
     const tBox = new THREE.Box3().setFromObject(group);
     tBox.expandByVector(new THREE.Vector3(-0.5, 0, -0.5));
     colliders.push(tBox);
-}
-
-// NEW: Helper for Static Parked Cars
-function createStaticCar(color) {
-    const group = new THREE.Group();
-    const bodyMat = new THREE.MeshStandardMaterial({ color, metalness: 0.5, roughness: 0.2 });
-    const body = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.7, 4.5), bodyMat);
-    body.position.y = 0.6; body.castShadow = true; group.add(body);
-    const cabin = new THREE.Mesh(new THREE.BoxGeometry(2.1, 0.8, 2.2), bodyMat);
-    cabin.position.set(0, 1.3, -0.3); group.add(cabin);
-    const glassMat = new THREE.MeshStandardMaterial({ color: 0x111111, metalness: 1, roughness: 0, transparent: true, opacity: 0.7 });
-    const win = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.7, 0.1), glassMat);
-    win.position.set(0, 1.35, 0.85); group.add(win);
-    const rear = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.6, 0.1), glassMat);
-    rear.position.set(0, 1.35, -1.45); group.add(rear);
-    return group;
 }
 
 // NEW: Global Landmark Tracker for Radar
@@ -284,36 +335,148 @@ for(let i = -400; i <= 400; i += 40) roadCoords.push(i);
 
 const roadMat = new THREE.MeshStandardMaterial({ color: 0x7a7a7a, roughness: 0.9, metalness: 0.1 });
 roadCoords.forEach(c => {
-    const hRoad = new THREE.Mesh(new THREE.PlaneGeometry(1200, 14), roadMat);
+    // Cut roads down so they form a perfect grid bounded at 400, creating the Perimeter Ring Road!
+    const hRoad = new THREE.Mesh(new THREE.PlaneGeometry(814, 14), roadMat);
     hRoad.rotation.x = -Math.PI / 2; hRoad.position.set(0, 0.02, c); hRoad.receiveShadow = true; scene.add(hRoad);
-    const vRoad = new THREE.Mesh(new THREE.PlaneGeometry(14, 1200), roadMat);
+    const vRoad = new THREE.Mesh(new THREE.PlaneGeometry(14, 814), roadMat);
     vRoad.rotation.x = -Math.PI / 2; vRoad.position.set(c, 0.02, 0); vRoad.receiveShadow = true; scene.add(vRoad);
 });
 
-const ground = new THREE.Mesh(new THREE.PlaneGeometry(1200, 1200), new THREE.MeshStandardMaterial({ color: 0x3a6a3a }));
-ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; scene.add(ground);
+// NEW: Marine Drive / Island Environment
+const ocean = new THREE.Mesh(new THREE.PlaneGeometry(3000, 3000), new THREE.MeshStandardMaterial({ color: 0x0284c7, roughness: 0.1, metalness: 0.8 }));
+ocean.rotation.x = -Math.PI / 2; ocean.position.y = -0.5; scene.add(ocean);
+
+// NEW: Medium Wide Beach
+const beach = new THREE.Mesh(new THREE.PlaneGeometry(1000, 1000), new THREE.MeshStandardMaterial({ color: 0xfde047, roughness: 1.0 }));
+beach.rotation.x = -Math.PI / 2; beach.position.y = 0.00; beach.receiveShadow = true; scene.add(beach);
+
+// NEW: Inner City Grass (Exactly fits inside the perimeter roads)
+const islandGrass = new THREE.Mesh(new THREE.PlaneGeometry(814, 814), new THREE.MeshStandardMaterial({ color: 0x3a6a3a }));
+islandGrass.rotation.x = -Math.PI / 2; islandGrass.position.y = 0.01; islandGrass.receiveShadow = true; scene.add(islandGrass);
 
 let hospitalFront = new THREE.Vector3(0,0,0);
 
 // Moved Vehicle class up here so it is initialized before the city generation loop spawns parked cars
 class Vehicle {
-    constructor(x, z, axis, dir, color) {
+    constructor(x, z, axis, dir, color, isCopCar = false, isAmbulance = false) {
         this.group = new THREE.Group();
-        this.speed = 0.12 + Math.random() * 0.08;
+        this.baseSpeed = 0.12 + Math.random() * 0.08; // Store base speed
+        this.speed = this.baseSpeed;
         this.currentSpeed = this.speed;
         this.occupied = false;
         this.hasDriver = true;
+        this.isCopCar = isCopCar;
+        this.isAmbulance = isAmbulance;
+        this.deployed = false;
+        this.isChasingCar = false; // Track if this specific car is assigned to the pursuit
         
-        const bodyMat = new THREE.MeshStandardMaterial({ color, metalness: 0.5, roughness: 0.2 });
-        const body = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.7, 4.5), bodyMat);
+        // NEW: Fire & Destruction Logic
+        this.maxHealth = 100;
+        this.health = 100;
+        this.isOnFire = false;
+        this.fireTimer = 0;
+        this.exploded = false;
+        
+        // Police cars are black with white doors! Ambulance is White!
+        const actualColor = isCopCar ? 0x111111 : (isAmbulance ? 0xffffff : color);
+        
+        // FIX: Store material so we can change its color later
+        this.bodyMat = new THREE.MeshStandardMaterial({ color: actualColor, metalness: 0.5, roughness: 0.2 });
+        const body = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.7, 4.5), this.bodyMat);
         body.position.y = 0.6; body.castShadow = true; this.group.add(body);
-        const cabin = new THREE.Mesh(new THREE.BoxGeometry(2.1, 0.8, 2.2), bodyMat);
-        cabin.position.set(0, 1.3, -0.3); this.group.add(cabin);
-        const glassMat = new THREE.MeshStandardMaterial({ color: 0x111111, metalness: 1, roughness: 0, transparent: true, opacity: 0.7 });
-        const win = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.7, 0.1), glassMat);
-        win.position.set(0, 1.35, 0.85); this.group.add(win);
-        const rear = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.6, 0.1), glassMat);
-        rear.position.set(0, 1.35, -1.45); this.group.add(rear);
+        
+        if (isAmbulance) {
+            // NEW: Boxy Ambulance Cabin and Decals
+            const cabin = new THREE.Mesh(new THREE.BoxGeometry(2.3, 1.6, 3.2), this.bodyMat);
+            cabin.position.set(0, 1.7, -0.6); this.group.add(cabin);
+            
+            const frontCab = new THREE.Mesh(new THREE.BoxGeometry(2.1, 0.8, 1.5), this.bodyMat);
+            frontCab.position.set(0, 1.3, 1.5); this.group.add(frontCab);
+
+            const glassMat = new THREE.MeshStandardMaterial({ color: 0x111111, metalness: 1, roughness: 0, transparent: true, opacity: 0.7 });
+            
+            // FIX: Proper front windshield for the Ambulance
+            const win = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.6, 0.1), glassMat);
+            win.position.set(0, 1.8, 1.0); win.rotation.x = -0.3; this.group.add(win);
+            
+            // FIX: Back doors with windows to look realistic
+            const doorMat = new THREE.MeshStandardMaterial({color: 0xdddddd, roughness: 0.5});
+            const doorL = new THREE.Mesh(new THREE.BoxGeometry(1.0, 1.4, 0.1), doorMat);
+            doorL.position.set(-0.55, 1.7, -2.25); this.group.add(doorL);
+            const doorR = new THREE.Mesh(new THREE.BoxGeometry(1.0, 1.4, 0.1), doorMat);
+            doorR.position.set(0.55, 1.7, -2.25); this.group.add(doorR);
+            
+            const doorWinL = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.5, 0.12), glassMat);
+            doorWinL.position.set(-0.55, 1.9, -2.25); this.group.add(doorWinL);
+            const doorWinR = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.5, 0.12), glassMat);
+            doorWinR.position.set(0.55, 1.9, -2.25); this.group.add(doorWinR);
+            
+            // Red Cross Graphics
+            const crossMat = new THREE.MeshStandardMaterial({ color: 0xef4444 });
+            const cH = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 0.4), crossMat);
+            const cV = new THREE.Mesh(new THREE.PlaneGeometry(0.4, 1.2), crossMat);
+            const crossGroupL = new THREE.Group(); crossGroupL.add(cH); crossGroupL.add(cV);
+            crossGroupL.position.set(1.16, 1.7, -0.6); crossGroupL.rotation.y = Math.PI/2;
+            this.group.add(crossGroupL);
+            
+            const crossGroupR = crossGroupL.clone();
+            crossGroupR.position.set(-1.16, 1.7, -0.6); crossGroupR.rotation.y = -Math.PI/2;
+            this.group.add(crossGroupR);
+
+            // Ambulance Sirens (Red and White)
+            const sirenGroup = new THREE.Group();
+            const sirenBase = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.1, 0.5), new THREE.MeshStandardMaterial({color: 0x222222}));
+            const sirenRed = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.2, 0.4), new THREE.MeshStandardMaterial({color: 0xff0000, emissive: 0x880000}));
+            sirenRed.position.x = 0.4; this.sirenRed = sirenRed; 
+            const sirenWhite = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.2, 0.4), new THREE.MeshStandardMaterial({color: 0xffffff, emissive: 0x888888}));
+            sirenWhite.position.x = -0.4; this.sirenBlue = sirenWhite; // Stored in sirenBlue variable for easy flashing logic reuse
+            sirenGroup.add(sirenBase); sirenGroup.add(sirenRed); sirenGroup.add(sirenWhite);
+            sirenGroup.position.set(0, 2.55, -0.6); 
+            this.group.add(sirenGroup);
+            
+        } else {
+            // Standard Car Cabin
+            const cabin = new THREE.Mesh(new THREE.BoxGeometry(2.1, 0.8, 2.2), this.bodyMat);
+            cabin.position.set(0, 1.3, -0.3); this.group.add(cabin);
+            const glassMat = new THREE.MeshStandardMaterial({ color: 0x111111, metalness: 1, roughness: 0, transparent: true, opacity: 0.7 });
+            const win = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.7, 0.1), glassMat);
+            win.position.set(0, 1.35, 0.85); this.group.add(win);
+            const rear = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.6, 0.1), glassMat);
+            rear.position.set(0, 1.35, -1.45); this.group.add(rear);
+        }
+        
+        if (isCopCar) {
+            // Police White Doors (Sticker/Decal)
+            const stickerMat = new THREE.MeshStandardMaterial({color: 0xffffff});
+            const stickerL = new THREE.Mesh(new THREE.PlaneGeometry(2.0, 0.6), stickerMat);
+            stickerL.rotation.y = Math.PI / 2; stickerL.position.set(1.21, 0.6, 0);
+            this.group.add(stickerL);
+            const stickerR = new THREE.Mesh(new THREE.PlaneGeometry(2.0, 0.6), stickerMat);
+            stickerR.rotation.y = -Math.PI / 2; stickerR.position.set(-1.21, 0.6, 0);
+            this.group.add(stickerR);
+            
+            // Roof Hooter (Red & Blue Siren)
+            const sirenGroup = new THREE.Group();
+            const sirenBase = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.1, 0.5), new THREE.MeshStandardMaterial({color: 0x222222}));
+            const sirenRed = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.2, 0.4), new THREE.MeshStandardMaterial({color: 0xff0000, emissive: 0x880000}));
+            sirenRed.position.x = 0.4;
+            this.sirenRed = sirenRed; // Save reference for flashing animation
+            const sirenBlue = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.2, 0.4), new THREE.MeshStandardMaterial({color: 0x0000ff, emissive: 0x000088}));
+            sirenBlue.position.x = -0.4;
+            this.sirenBlue = sirenBlue; // Save reference
+            sirenGroup.add(sirenBase); sirenGroup.add(sirenRed); sirenGroup.add(sirenBlue);
+            sirenGroup.position.set(0, 1.75, -0.3); // Positioned securely on the cabin roof
+            this.group.add(sirenGroup);
+        }
+
+        // Fire Visual Mesh
+        const fireGeo = new THREE.DodecahedronGeometry(1.4);
+        const fireMat = new THREE.MeshBasicMaterial({color: 0xff4400, wireframe: true});
+        this.fireMesh = new THREE.Mesh(fireGeo, fireMat);
+        this.fireMesh.position.set(0, 1.5, 0);
+        this.fireMesh.visible = false;
+        this.group.add(this.fireMesh);
+
         const rimMat = new THREE.MeshStandardMaterial({color: 0xcccccc, metalness: 0.8, roughness: 0.2});
         for(let i=0; i<4; i++) {
             const wg = new THREE.Group();
@@ -327,39 +490,329 @@ class Vehicle {
         this.group.rotation.y = axis === 'x' ? (dir > 0 ? Math.PI/2 : -Math.PI/2) : (dir > 0 ? 0 : Math.PI);
         scene.add(this.group); traffic.push(this);
     }
+    
+    // NEW: Color and Damage Methods
+    changeColor(hexColor) {
+        if (!this.isCopCar && !this.exploded && !this.isOnFire) {
+            this.bodyMat.color.setHex(hexColor);
+        }
+    }
+    
+    takeDamage(amount) {
+        if (this.isOnFire || this.exploded) return; // Already dying
+        this.health -= amount;
+        if (this.health <= 0) {
+            this.health = 0;
+            this.isOnFire = true;
+            this.fireTimer = 3.0; // 3 seconds to bail out before massive explosion!
+            
+            // Engine dies instantly
+            this.speed = 0;
+            this.currentSpeed = 0;
+            if (this.sirenRed) this.sirenRed.material.emissiveIntensity = 0;
+            if (this.sirenBlue) this.sirenBlue.material.emissiveIntensity = 0;
+        }
+    }
+
+    explode() {
+        this.exploded = true;
+        this.isOnFire = false;
+        this.fireMesh.visible = false;
+        this.bodyMat.color.setHex(0x222222); // Turn burnt black
+        this.bodyMat.metalness = 0.1;
+
+        // Visual explosion sphere
+        const expMesh = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 16), new THREE.MeshBasicMaterial({color: 0xffaa00, transparent: true, opacity: 0.8}));
+        expMesh.position.copy(this.group.position);
+        scene.add(expMesh);
+        explosions.push({ mesh: expMesh, life: 0.8, maxLife: 0.8 });
+
+        // Damage Player
+        if (activeCar === this) {
+            playerHealth = 0; // Wasted inside!
+            updateHealth();
+        } else if (!playerWasted && player.group.position.distanceTo(this.group.position) < 8) {
+            playerHealth -= 40; // Splash damage
+            updateHealth();
+        }
+
+        // Damage nearby NPCs (Blast radius)
+        npcs.forEach(n => {
+            if (!n.isDead && n.group.position.distanceTo(this.group.position) < 8) {
+                n.isDead = true;
+                if (!n.velocity) n.velocity = new THREE.Vector3();
+                n.velocity.subVectors(n.group.position, this.group.position).normalize().multiplyScalar(1.5);
+                n.velocity.y = 1.0; // Blast them away
+            }
+        });
+
+        // Damage nearby cars (Chain Reaction)
+        traffic.forEach(v => {
+            if (v !== this && !v.exploded && v.group.position.distanceTo(this.group.position) < 10) {
+                v.takeDamage(100); 
+            }
+        });
+        
+        // Wanted Level escalation if explosion is near player
+        if (wantedLevel === 0 && player.group.position.distanceTo(this.group.position) < 20) {
+            updateWantedLevel(1);
+        }
+    }
+
     update(delta) {
-        if (this.occupied || !this.hasDriver) return; // Empty cars stay parked
+        if (this.exploded) {
+            // NEW: Vanish and Recycle Destroyed Cars!
+            if (!this.vanishTimer) this.vanishTimer = 10.0;
+            this.vanishTimer -= delta;
+            
+            if (this.vanishTimer <= 0 && !this.vanished) {
+                this.vanished = true;
+                this.group.position.set(0, -1000, 0); // Hide underground instantly
+                
+                // Respawn as a fresh car 3 seconds later
+                setTimeout(() => {
+                    this.health = this.maxHealth;
+                    this.exploded = false;
+                    this.isOnFire = false;
+                    this.hasDriver = true;
+                    this.occupied = false;
+                    this.vanished = false;
+                    this.deployed = false;
+                    this.isChasingCar = false;
+                    this.vanishTimer = 10.0; // Reset timer
+                    this.bodyMat.metalness = 0.5;
+                    
+                    if (!this.isCopCar) {
+                        this.bodyMat.color.setHex(carColors[Math.floor(Math.random() * carColors.length)]);
+                    } else {
+                        this.bodyMat.color.setHex(0x111111); // Police black
+                    }
+                    
+                    // Spawn dynamically near the player on a valid road grid
+                    const angle = Math.random() * Math.PI * 2;
+                    let spawnX = player.group.position.x + Math.cos(angle) * 120;
+                    let spawnZ = player.group.position.z + Math.sin(angle) * 120;
+                    if (Math.abs(Math.cos(angle)) > Math.abs(Math.sin(angle))) {
+                        spawnZ = Math.round(spawnZ / 40) * 40;
+                    } else {
+                        spawnX = Math.round(spawnX / 40) * 40;
+                    }
+                    
+                    // FORCE NEW CARS TO SPAWN STRICTLY ON THE ROAD NETWORK (NO BEACH SPAWNS)
+                    spawnX = Math.max(-400, Math.min(400, spawnX));
+                    spawnZ = Math.max(-400, Math.min(400, spawnZ));
+
+                    this.group.position.set(spawnX, 0, spawnZ);
+                    this.group.rotation.y = Math.random() > 0.5 ? 0 : Math.PI;
+                    this.speed = this.baseSpeed;
+                }, 3000);
+            }
+            return; // Destroyed cars are dead props
+        }
+        
+        if (this.isOnFire) {
+            this.fireMesh.visible = true;
+            this.fireMesh.rotation.y += 10 * delta;
+            this.fireMesh.rotation.x += 10 * delta;
+            this.fireMesh.scale.setScalar(1 + Math.random() * 0.5);
+            this.fireMesh.material.color.setHex(Math.random() > 0.5 ? 0xff4400 : 0xffaa00);
+
+            this.fireTimer -= delta;
+            if (this.fireTimer <= 0) {
+                this.explode();
+            }
+            
+            // NPCs panic and bail out of burning cars!
+            if (this.hasDriver && this !== activeCar) {
+                this.hasDriver = false;
+                const isFemaleDriver = Math.random() > 0.5;
+                const driver = createHuman({ 
+                    isFemale: isFemaleDriver,
+                    shirt: this.isCopCar ? 0x1d4ed8 : civilianShirts[Math.floor(Math.random() * civilianShirts.length)],
+                    isCop: this.isCopCar
+                });
+                // Eject onto the street, firmly avoiding walls
+                driver.group.position.copy(this.group.position).add(new THREE.Vector3(-2.5, 0, 0).applyEuler(this.group.rotation));
+                driver.group.position.x = Math.max(-400, Math.min(400, driver.group.position.x));
+                driver.group.position.z = Math.max(-400, Math.min(400, driver.group.position.z));
+                driver.group.position.y += 0.5;
+                scene.add(driver.group);
+                npcs.push({ 
+                    ...driver, walkPhase: 0, rot: this.group.rotation.y, isCop: this.isCopCar, isChasing: false,
+                    isDead: false, isFleeing: true, // Run away from the impending explosion!
+                    velocity: new THREE.Vector3()
+                });
+            }
+            return; // Stop normal driving logic while on fire
+        }
+
+        if (this.occupied || !this.hasDriver) {
+            // Keep sirens flashing if it was an abandoned pursuit car or parked ambulance
+            if ((this.deployed || this.isAmbulance) && this.sirenRed && this.sirenBlue && (wantedLevel >= 2 || this.isAmbulance)) {
+                const time = Date.now();
+                this.sirenRed.material.emissiveIntensity = (Math.floor(time / 150) % 2 === 0) ? 2 : 0;
+                this.sirenBlue.material.emissiveIntensity = (Math.floor(time / 150) % 2 === 1) ? 2 : 0;
+            } else if (this.sirenRed && this.sirenBlue) {
+                this.sirenRed.material.emissiveIntensity = 0;
+                this.sirenBlue.material.emissiveIntensity = 0;
+            }
+            return; // Empty cars stay parked
+        }
         const prevPos = this.group.position.clone();
-        const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(this.group.quaternion);
         
         let blocked = false;
+        // FIX: Only the globally assigned pursuit car will chase, stopping the swarms!
+        let isChasing = (this.isChasingCar && this.hasDriver && wantedLevel >= 2);
         
-        // Smart Cone Sensor
-        const checkBlock = (targetObj, distLimit, dotLimit) => {
-            const toTarget = new THREE.Vector3().subVectors(targetObj.position, this.group.position);
-            const dist = toTarget.length();
-            if (dist > 0.1 && dist < distLimit && toTarget.normalize().dot(forward) > dotLimit) {
-                return true;
+        if (isChasing) {
+            this.speed = 0.42; // NEW: Huge speed boost to catch up to the player!
+            
+            const targetPos = activeCar ? activeCar.group.position : player.group.position;
+            const distToTarget = this.group.position.distanceTo(targetPos);
+            
+            // NEW: Deploy cops!
+            if (distToTarget < 15 && !this.deployed) {
+                this.deployed = true;
+                this.hasDriver = false; // Ejects driver!
+                
+                // Spawn 1 Male Cop
+                const maleCop = createHuman({ isFemale: false, shirt: 0x1d4ed8, pants: 0x1e293b, hair: 0x111111, isCop: true });
+                maleCop.group.position.copy(this.group.position).add(new THREE.Vector3(2.5, 0, 0).applyEuler(this.group.rotation));
+                scene.add(maleCop.group);
+                npcs.push({ ...maleCop, walkPhase: 0, rot: this.group.rotation.y, isCop: true, isChasing: true });
+
+                // Spawn 1 Female Cop
+                const femaleCop = createHuman({ isFemale: true, shirt: 0x1d4ed8, pants: 0x1e293b, hair: 0x111111, isCop: true });
+                femaleCop.group.position.copy(this.group.position).add(new THREE.Vector3(-2.5, 0, 0).applyEuler(this.group.rotation));
+                scene.add(femaleCop.group);
+                npcs.push({ ...femaleCop, walkPhase: 0, rot: this.group.rotation.y, isCop: true, isChasing: true });
+                
+                return; // Stop updating vehicle movement this frame
             }
-            return false;
-        };
 
-        if (activeCar && checkBlock(activeCar.group, 10, 0.3)) blocked = true;
-        if (!activeCar && checkBlock(player.group, 8, 0.4)) blocked = true;
+            // Flashing Sirens
+            if (this.sirenRed && this.sirenBlue) {
+                const time = Date.now();
+                this.sirenRed.material.emissiveIntensity = (Math.floor(time / 150) % 2 === 0) ? 2 : 0;
+                this.sirenBlue.material.emissiveIntensity = (Math.floor(time / 150) % 2 === 1) ? 2 : 0;
+            }
 
-        if (!blocked) {
-            for(let v of traffic) {
-                if (v !== this && checkBlock(v.group, 9, 0.6)) { blocked = true; break; }
+            // Aggressive Steering towards target
+            const dirX = targetPos.x - this.group.position.x;
+            const dirZ = targetPos.z - this.group.position.z;
+            const targetRot = Math.atan2(dirX, dirZ);
+            
+            let diff = targetRot - this.group.rotation.y;
+            while (diff < -Math.PI) diff += Math.PI * 2;
+            while (diff > Math.PI) diff -= Math.PI * 2;
+            
+            this.group.rotation.y += Math.sign(diff) * Math.min(Math.abs(diff), 0.04 * (delta * 60));
+            
+        } else {
+            this.speed = this.baseSpeed; // Return to normal speed
+            
+            // Turn off sirens if patroling
+            if (this.sirenRed && this.sirenBlue) {
+                this.sirenRed.material.emissiveIntensity = 0;
+                this.sirenBlue.material.emissiveIntensity = 0;
+            }
+
+            // NEW: Smart Cone Sensor with strict Two-Lane separation check
+            const checkBlock = (targetObj, distLimit, dotLimit, checkLane = false) => {
+                const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(this.group.quaternion);
+                const toTarget = new THREE.Vector3().subVectors(targetObj.position, this.group.position);
+                const dist = toTarget.length();
+                if (dist > 0.1 && dist < distLimit && toTarget.normalize().dot(forward) > dotLimit) {
+                    if (checkLane) {
+                        const right = new THREE.Vector3(-1, 0, 0).applyQuaternion(this.group.quaternion);
+                        const latDist = Math.abs(toTarget.dot(right));
+                        // FIX: Tighter lateral check (2.5) to completely ignore oncoming lane traffic
+                        if (latDist > 2.5) return false; 
+                    }
+                    return true;
+                }
+                return false;
+            };
+
+            // FIX: Dramatically increased sensor range to reduce NPC accidents. CheckLane enabled for traffic!
+            if (activeCar && checkBlock(activeCar.group, 16, 0.3, true)) blocked = true;
+            if (!activeCar && checkBlock(player.group, 12, 0.4)) blocked = true;
+
+            if (!blocked) {
+                for(let v of traffic) {
+                    if (v !== this && checkBlock(v.group, 18, 0.6, true)) { blocked = true; break; }
+                }
+            }
+            if (!blocked) {
+                for(let n of npcs) {
+                    if (!n.isDead && checkBlock(n.group, 9, 0.5)) { blocked = true; break; }
+                }
             }
         }
-        if (!blocked) {
-            for(let n of npcs) {
-                if (!n.isDead && checkBlock(n.group, 7, 0.5)) { blocked = true; break; }
-            }
-        }
         
-        this.currentSpeed = THREE.MathUtils.lerp(this.currentSpeed, blocked ? 0 : this.speed, 0.1);
+        // Re-calculate forward vector after potential chasing rotation
+        const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(this.group.quaternion);
+        
+        // FIX: Brake 4x faster when an obstacle is detected to prevent pile-ups
+        this.currentSpeed = THREE.MathUtils.lerp(this.currentSpeed, blocked ? 0 : this.speed, blocked ? 0.2 : 0.05);
         this.group.position.add(forward.multiplyScalar(this.currentSpeed * (delta * 60)));
+
+        // NEW: Two-Lane Auto-Centering Physics (Prevents drifting and stabilizes traffic flow)
+        if (!isChasing && this.currentSpeed > 0.05) {
+            // Only apply lane centering when actively driving mostly straight
+            if (Math.abs(forward.z) > 0.9) {
+                let targetX = Math.round(this.group.position.x / 40) * 40;
+                targetX += (forward.z > 0 ? -3.5 : 3.5); // FIX: Correct Right-hand lane offset for Z-axis
+                this.group.position.x += (targetX - this.group.position.x) * 0.08;
+            } else if (Math.abs(forward.x) > 0.9) {
+                let targetZ = Math.round(this.group.position.z / 40) * 40;
+                targetZ += (forward.x > 0 ? 3.5 : -3.5); // FIX: Correct Right-hand lane offset for X-axis
+                this.group.position.z += (targetZ - this.group.position.z) * 0.08;
+            }
+        }
+        
+        // FIX: Anti-Jam Logic! If blocked for too long, force a turn to clear the intersection.
+        if (blocked && !isChasing && this.hasDriver && !this.occupied) {
+            this.stuckTimer = (this.stuckTimer || 0) + delta;
+            if (this.stuckTimer > 4.0) {
+                this.group.rotation.y += (Math.random() > 0.5 ? Math.PI / 2 : -Math.PI / 2);
+                this.group.rotation.y = Math.round(this.group.rotation.y / (Math.PI/2)) * (Math.PI/2);
+                this.stuckTimer = 0;
+            }
+        } else {
+            this.stuckTimer = 0;
+        }
+
+        // --- NEW ANTI-GHOSTING / VEHICLE SEPARATION ---
+        for (let other of traffic) {
+            if (other !== this) {
+                const dist = this.group.position.distanceTo(other.group.position);
+                if (dist > 0.01 && dist < 4.5) { // Increased separation buffer
+                    const pushDir = new THREE.Vector3().subVectors(this.group.position, other.group.position).normalize();
+                    this.group.position.add(pushDir.multiplyScalar(isChasing ? 0.2 : 0.08));
+                } else if (dist <= 0.01) {
+                    this.group.position.x += 0.2; 
+                    this.group.position.z += 0.2;
+                }
+            }
+        }
+
+        // NEW: Strictly keep AI Cars ON THE ROAD (Perimeter Logic)
+        if (Math.abs(this.group.position.x) > 400 || Math.abs(this.group.position.z) > 400) {
+            this.group.position.x = Math.max(-400, Math.min(400, this.group.position.x));
+            this.group.position.z = Math.max(-400, Math.min(400, this.group.position.z));
+            
+            // Turn 90 degrees to drive along the perimeter ring road!
+            if (!isChasing) {
+                this.group.rotation.y += (Math.random() > 0.5 ? Math.PI/2 : -Math.PI/2);
+            } else {
+                this.group.rotation.y += Math.PI; // Cops aggressively U-turn at borders
+            }
+            
+            // Snap mathematically to the exact axis so they don't drift onto the beach
+            this.group.rotation.y = Math.round(this.group.rotation.y / (Math.PI/2)) * (Math.PI/2);
+            this.currentSpeed = 0.05; // Slow down slightly for the corner
+        }
 
         this.group.updateMatrixWorld();
         const vBox = new THREE.Box3().setFromObject(this.group);
@@ -377,14 +830,23 @@ class Vehicle {
             }
         }
 
-        if (hitBuilding) this.group.rotation.y += Math.PI;
-        // Expanded Bounds Check
-        if (Math.abs(this.group.position.x) > 500 || Math.abs(this.group.position.z) > 500) this.group.position.multiplyScalar(-0.98);
+        if (hitBuilding) {
+            // FIX: Rebalanced building crash damage (Takes ~6 full speed hits to destroy a car)
+            this.takeDamage(Math.abs(this.currentSpeed) * 50); 
+            if (isChasing) {
+                this.group.rotation.y += Math.PI / 1.5; // Cops aggressively deflect off walls instead of U-turning
+            } else {
+                this.group.rotation.y += Math.PI; // Normal traffic U-turn
+            }
+        }
     }
 }
 
 for(let rx of roadCoords) {
     for(let rz of roadCoords) {
+        // FIX: Prevent buildings from spilling over the perimeter ring road onto the beach!
+        if (rx >= 400 || rz >= 400 || rx <= -400 || rz <= -400) continue; 
+        
         if (Math.abs(rx) % 40 === 0 && Math.abs(rz) % 40 === 0) {
             const bX = rx + 20, bZ = rz + 20; // Center of the block
             
@@ -430,6 +892,11 @@ for(let rx of roadCoords) {
                 hospitalGroup.updateMatrixWorld();
                 const box = new THREE.Box3().setFromObject(clinic); box.expandByVector(new THREE.Vector3(-1, 0, -1));
                 colliders.push(box);
+                
+                // NEW: Spawn the Identifiable Drivable Ambulance!
+                const ambulance = new Vehicle(bX - 4, bZ + 8, 'x', 1, 0xffffff, false, true);
+                ambulance.hasDriver = false;
+                ambulance.group.rotation.y = Math.PI / 2;
 
             } else if (rx === -120 && rz === 160) {
                 // 2. CAR WASH
@@ -439,7 +906,11 @@ for(let rx of roadCoords) {
                 const wallL = new THREE.Mesh(new THREE.BoxGeometry(4, 12, 24), cwMat); wallL.position.set(-10, 6, 0);
                 const wallR = new THREE.Mesh(new THREE.BoxGeometry(4, 12, 24), cwMat); wallR.position.set(10, 6, 0);
                 const roof = new THREE.Mesh(new THREE.BoxGeometry(24, 2, 24), cwMat); roof.position.set(0, 13, 0);
-                const sign = new THREE.Mesh(new THREE.BoxGeometry(16, 4, 1), new THREE.MeshStandardMaterial({color: 0xec4899})); sign.position.set(0, 16, 11.5);
+                
+                // NEW: Identifiable Car Wash Sign
+                const signMat = new THREE.MeshStandardMaterial({ map: createCarWashTexture(), roughness: 0.5 });
+                const sign = new THREE.Mesh(new THREE.BoxGeometry(16, 4, 1), signMat); 
+                sign.position.set(0, 16, 11.5);
                 
                 cwGroup.add(wallL); cwGroup.add(wallR); cwGroup.add(roof); cwGroup.add(sign);
                 cwGroup.position.set(bX, 0, bZ); scene.add(cwGroup);
@@ -471,14 +942,16 @@ for(let rx of roadCoords) {
                     colliders.push(box);
                 });
 
-                // Spawn Prisoners!
-                for(let i=0; i<3; i++) {
+                // Spawn Prisoners! (Increased from 3 to 10)
+                for(let i=0; i<10; i++) {
                     // FIX: Explicitly alternate genders to guarantee a mix, bypassing random chance luck
                     const isFemalePrisoner = (i % 2 !== 0); 
                     const prisoner = createHuman({ isFemale: isFemalePrisoner, shirt: 0xff5500, pants: 0xff5500 }); // Orange Jumpsuits
                     prisoner.group.position.set(bX + (Math.random()-0.5)*15, 0, bZ + (Math.random()-0.5)*15);
                     scene.add(prisoner.group);
-                    npcs.push({ ...prisoner, walkPhase: Math.random()*10, rot: Math.random()*Math.PI*2, isCop: false, isChasing: false });
+                    
+                    // NEW: Tagged as prisoners with specific bounding coordinates
+                    npcs.push({ ...prisoner, walkPhase: Math.random()*10, rot: Math.random()*Math.PI*2, isCop: false, isChasing: false, isPrisoner: true, prisonX: bX, prisonZ: bZ });
                 }
 
             } else if (rx === -200 && rz === -80) {
@@ -505,6 +978,50 @@ for(let rx of roadCoords) {
                         if (Math.random() > 0.3) createTree(bX - 9 + (c*6), bZ - 9 + (r*6), true); // Bushes
                     }
                 }
+            } else if (rx === 80 && rz === 80) {
+                // 6. POLICE STATION COMPOUND
+                addLandmark(bX, bZ, '#1d4ed8', 'S'); // Blue 'S' for Station
+                const pdGroup = new THREE.Group();
+                // Replace the solid color with our new "POLICE" texture
+                const pdWall = new THREE.MeshStandardMaterial({map: createPoliceTexture(), roughness: 0.9}); 
+                const pdBlue = new THREE.MeshStandardMaterial({color: 0x1d4ed8}); // Police Blue
+                
+                // Concrete base
+                const concrete = new THREE.Mesh(new THREE.PlaneGeometry(26, 26), new THREE.MeshStandardMaterial({color: 0x888888}));
+                concrete.rotation.x = -Math.PI/2; concrete.position.y = 0.03; pdGroup.add(concrete);
+
+                // Main Building
+                const pdMain = new THREE.Mesh(new THREE.BoxGeometry(16, 20, 16), pdWall);
+                pdMain.position.set(-3, 10, -3); pdMain.castShadow = true; pdMain.receiveShadow = true;
+                pdGroup.add(pdMain);
+
+                // Blue Trim
+                const pdTrim = new THREE.Mesh(new THREE.BoxGeometry(16.2, 4, 16.2), pdBlue);
+                pdTrim.position.set(-3, 18, -3); pdGroup.add(pdTrim);
+
+                // Entrance Frame
+                const pdEnt = new THREE.Mesh(new THREE.BoxGeometry(6, 6, 2), pdBlue);
+                pdEnt.position.set(-3, 3, 5.5); pdGroup.add(pdEnt);
+
+                // NEW: Dark Glass Entrance Doors
+                const pdDoors = new THREE.Mesh(new THREE.BoxGeometry(4.5, 4.5, 2.2), new THREE.MeshStandardMaterial({color: 0x0f172a, roughness: 0.1}));
+                pdDoors.position.set(-3, 2.25, 5.5); pdGroup.add(pdDoors);
+
+                // Roof Helipad Base
+                const pad = new THREE.Mesh(new THREE.CylinderGeometry(5, 5, 0.2, 16), new THREE.MeshStandardMaterial({color: 0x333333}));
+                pad.position.set(-3, 20.1, -3); pdGroup.add(pad);
+
+                pdGroup.position.set(bX, 0, bZ); scene.add(pdGroup);
+                pdGroup.updateMatrixWorld();
+
+                const pdBox = new THREE.Box3().setFromObject(pdMain); pdBox.expandByVector(new THREE.Vector3(-1, 0, -1));
+                colliders.push(pdBox);
+
+                // Spawn a parked Cop Car with full police livery
+                const pCar = new Vehicle(bX + 8, bZ + 8, 'z', 1, 0xffffff, true);
+                pCar.hasDriver = false;
+                pCar.group.rotation.y = Math.PI;
+
             } else {
                 // MULTIPLE RANDOMIZED DYNAMIC ZONES
                 const rand = Math.random();
@@ -564,16 +1081,20 @@ scene.add(healthPickup);
 let healthPickupTimer = 0;
 
 roadCoords.forEach(c => {
+    // 15% chance for generated traffic cars to be Police Patrols
+    const isCop1 = Math.random() < 0.15; const isCop2 = Math.random() < 0.15;
+    const isCop3 = Math.random() < 0.15; const isCop4 = Math.random() < 0.15;
+    
     const c1 = carColors[Math.floor(Math.random()*carColors.length)];
     const c2 = carColors[Math.floor(Math.random()*carColors.length)];
     const c3 = carColors[Math.floor(Math.random()*carColors.length)];
     const c4 = carColors[Math.floor(Math.random()*carColors.length)];
     
-    // Expanded traffic spawning radius
-    new Vehicle(c + 3.5, (Math.random()-0.5)*900, 'z', 1, c1);
-    new Vehicle(c - 3.5, (Math.random()-0.5)*900, 'z', -1, c2);
-    new Vehicle((Math.random()-0.5)*900, c + 3.5, 'x', 1, c3);
-    new Vehicle((Math.random()-0.5)*900, c - 3.5, 'x', -1, c4);
+    // Snapped traffic spawning strictly inside the 400 perimeter grid
+    new Vehicle(c + 3.5, (Math.random()-0.5)*800, 'z', 1, c1, isCop1);
+    new Vehicle(c - 3.5, (Math.random()-0.5)*800, 'z', -1, c2, isCop2);
+    new Vehicle((Math.random()-0.5)*800, c + 3.5, 'x', 1, c3, isCop3);
+    new Vehicle((Math.random()-0.5)*800, c - 3.5, 'x', -1, c4, isCop4);
 });
 
 // Wanted System
@@ -596,19 +1117,111 @@ function updateWantedLevel(stars) {
 }
 
 function assignChasers() {
-    let activeChasers = npcs.filter(n => n.isCop && n.isChasing && !n.isDead).length;
-    let targetChasers = wantedLevel === 1 ? 1 : wantedLevel * 2; 
+    if (wantedLevel === 0) return;
+    
+    // 1. RETIRE LOST CHASERS (If you outrun them, they drop the chase so new ones can spawn ahead of you)
+    npcs.forEach(n => {
+        if (n.isCop && n.isChasing && !n.isDead) {
+            if (n.group.position.distanceTo(player.group.position) > 90) {
+                n.isChasing = false; // Out of range, let them go back to patrol
+            }
+        }
+    });
 
-    for (let n of npcs) {
-        if (activeChasers >= targetChasers) break;
-        if (n.isCop && !n.isChasing && !n.isDead) {
-            n.isChasing = true;
-            activeChasers++;
+    traffic.forEach(v => {
+        if (v.isCopCar && v.isChasingCar && v.hasDriver) {
+            if (v.group.position.distanceTo(player.group.position) > 130) {
+                v.isChasingCar = false; // Out of range
+                if (v.sirenRed && v.sirenBlue) {
+                    v.sirenRed.material.emissiveIntensity = 0;
+                    v.sirenBlue.material.emissiveIntensity = 0;
+                }
+            }
+        }
+    });
+
+    let activeFootChasers = npcs.filter(n => n.isCop && n.isChasing && !n.isDead).length;
+    let activeCarChasers = traffic.filter(v => v.isCopCar && v.isChasingCar && v.hasDriver).length;
+
+    if (wantedLevel === 1) {
+        // 1 STAR: Exactly 1 running cop
+        if (activeFootChasers < 1 && activeCarChasers === 0) {
+            let nearestCop = null;
+            let minDist = Infinity;
+            for (let n of npcs) {
+                if (n.isCop && !n.isChasing && !n.isDead) {
+                    const dist = n.group.position.distanceTo(player.group.position);
+                    if (dist < minDist) {
+                        minDist = dist;
+                        nearestCop = n;
+                    }
+                }
+            }
+            
+            if (nearestCop) {
+                // Teleport the cop nearby if they are too far away
+                if (minDist > 50) {
+                    const angle = Math.random() * Math.PI * 2;
+                    nearestCop.group.position.set(
+                        player.group.position.x + Math.cos(angle) * 35,
+                        0,
+                        player.group.position.z + Math.sin(angle) * 35
+                    );
+                }
+                nearestCop.isChasing = true;
+            }
+        }
+    } else if (wantedLevel >= 2) {
+        // 2 STARS: Exactly 1 Patrol Car (which deploys the male & female officers)
+        if (activeCarChasers === 0 && activeFootChasers < 2) {
+            let nearestCopCar = null;
+            let minDist = Infinity;
+            for (let v of traffic) {
+                // Make sure we don't grab a car that has already deployed its officers or is destroyed
+                if (v.isCopCar && v.hasDriver && !v.isChasingCar && !v.deployed && !v.isOnFire && !v.exploded) {
+                    const dist = v.group.position.distanceTo(player.group.position);
+                    if (dist < minDist) {
+                        minDist = dist;
+                        nearestCopCar = v;
+                    }
+                }
+            }
+            
+            // NEW: If absolutely no cop cars are available, forcefully generate a new one!
+            if (!nearestCopCar) {
+                nearestCopCar = new Vehicle(0, -1000, 'z', 1, 0xffffff, true);
+                minDist = 1000;
+            }
+            
+            if (nearestCopCar) {
+                if (minDist > 70) {
+                    // Teleport car ahead of the player on the nearest road grid!
+                    const angle = Math.random() * Math.PI * 2;
+                    let spawnX = player.group.position.x + Math.cos(angle) * 100;
+                    let spawnZ = player.group.position.z + Math.sin(angle) * 100;
+                    
+                    // Snap strictly to the nearest road (multiples of 40) so they don't get stuck in buildings
+                    if (Math.abs(Math.cos(angle)) > Math.abs(Math.sin(angle))) {
+                        spawnZ = Math.round(spawnZ / 40) * 40;
+                    } else {
+                        spawnX = Math.round(spawnX / 40) * 40;
+                    }
+
+                    // KEEP COP CAR SPAWNS STRICTLY IN THE CITY BOUNDS (No driving on the beach!)
+                    spawnX = Math.max(-400, Math.min(400, spawnX));
+                    spawnZ = Math.max(-400, Math.min(400, spawnZ));
+
+                    nearestCopCar.group.position.set(spawnX, 0, spawnZ);
+                    nearestCopCar.group.lookAt(player.group.position);
+                }
+                nearestCopCar.isChasingCar = true;
+            }
         }
     }
 }
 
-const civilianShirts = [0xff44aa, 0x4488ff, 0x11cc33, 0xffaa00, 0xeeeeee, 0x8833cc, 0xffffff, 0x9900ff];
+// FIX: Removed blue (0x4488ff) and added bright cyan (0x00ffff) so civilians don't blend with Police (0x1d4ed8)
+const civilianShirts = [0xff44aa, 0x00ffff, 0x11cc33, 0xffaa00, 0xeeeeee, 0x8833cc, 0xffffff, 0x9900ff];
 
 // Increased to 350 NPCs for massive expanded city
 for(let i=0; i<350; i++) {
@@ -620,8 +1233,8 @@ for(let i=0; i<350; i++) {
     const hairCol = isCop ? 0x111111 : 0x2b1600; 
 
     const p = createHuman({ isFemale, shirt: shirtCol, pants: pantCol, hair: hairCol, isCop });
-    // Expanded spawn radius
-    p.group.position.set((Math.random()-0.5)*900, 0, (Math.random()-0.5)*900);
+    // NEW: Allow pedestrians to spawn out onto the medium beach sand (up to 950)
+    p.group.position.set((Math.random()-0.5)*950, 0, (Math.random()-0.5)*950);
     scene.add(p.group);
     npcs.push({ ...p, walkPhase: Math.random()*10, rot: Math.random()*Math.PI*2, isCop, isChasing: false });
 }
@@ -663,9 +1276,11 @@ gun.add(muzzleFlash);
 
 let muzzleTimer = 0;
 
-// NEW: Player Health Variables
+// NEW: Player Health & Physics Variables
 let playerHealth = 100;
 let playerWasted = false;
+let playerVelocityY = 0;
+let isGrounded = true;
 
 function updateHealth() {
     if (playerHealth <= 0) {
@@ -715,6 +1330,15 @@ let hijackTimer = 0, hijackTarget = null;
 window.onkeydown = e => { 
     if (playerWasted) return; // Disable controls if Wasted
     const k = e.key.toLowerCase(); keys[k] = true; 
+    
+    if (e.code === 'Space') {
+        e.preventDefault(); // Prevent page scrolling
+        if (isGrounded && !activeCar) {
+            playerVelocityY = 0.25; // Trigger Jump
+            isGrounded = false;
+        }
+    }
+    
     if (k === 's' && !activeCar && !player.isArmed) flipOffset = (flipOffset === 0) ? Math.PI : 0;
     if (k === 'f') handleHijack();
     if (k === 'r' && !activeCar) toggleWeapon(); 
@@ -797,6 +1421,7 @@ function shootWeapon() {
         hitTarget.velocity.y = 0.5; 
     } else if (hitType === 'car') {
         if (wantedLevel === 0) updateWantedLevel(1);
+        hitTarget.takeDamage(25); // 4 point-blank shots to catch a car on fire!
         hitTarget.group.position.add(ray.direction.normalize().multiplyScalar(0.5)); // Impact jolt on the car
     }
 }
@@ -809,6 +1434,8 @@ function handleHijack() {
         activeCar.occupied = false; activeCar = null;
         carSpeed = 0;
     } else if (playerNearCar && hijackTimer <= 0) {
+        if (playerNearCar.exploded) return; // Cannot hijack burnt out blown up cars
+        
         // Holster weapon if hijacking
         if (player.isArmed) toggleWeapon();
         
@@ -820,20 +1447,39 @@ function handleHijack() {
         document.getElementById('prompt').classList.add('hidden');
 
         if (hijackTarget.hasDriver) {
+            // Hijacking a DRIVEN car triggers 1 Star immediately
+            if (wantedLevel === 0) updateWantedLevel(1); 
+            
             hijackTarget.hasDriver = false;
+            
+            // If hijacking a cop car, the driver we pull out is a Cop!
+            const isCopDriver = hijackTarget.isCopCar;
             const isFemaleDriver = Math.random() > 0.5;
+            
             const driver = createHuman({ 
                 isFemale: isFemaleDriver,
-                shirt: civilianShirts[Math.floor(Math.random() * civilianShirts.length)] 
+                shirt: isCopDriver ? 0x1d4ed8 : civilianShirts[Math.floor(Math.random() * civilianShirts.length)],
+                isCop: isCopDriver
             });
+            
             driver.group.position.copy(player.group.position);
             driver.group.position.y += 0.5;
             scene.add(driver.group);
             npcs.push({ 
-                ...driver, walkPhase: 0, rot: hijackTarget.group.rotation.y, isCop: false, isChasing: false,
-                isDead: true, recoverTimer: 1.5, isAngryDriver: true, targetCar: hijackTarget,
+                ...driver, walkPhase: 0, rot: hijackTarget.group.rotation.y, isCop: isCopDriver, isChasing: isCopDriver,
+                isDead: true, recoverTimer: 1.5, isAngryDriver: !isCopDriver, targetCar: hijackTarget,
                 velocity: new THREE.Vector3(-0.3, 0.4, 0).applyEuler(hijackTarget.group.rotation)
             });
+            
+            // If the driver is a cop, they instantly trigger the chase
+            if (isCopDriver) assignChasers();
+            
+        } else {
+            // Stealing an EMPTY PARKED car
+            if (hijackTarget.isCopCar && wantedLevel === 0) {
+                // Stealing police property is a crime!
+                updateWantedLevel(1);
+            }
         }
     }
 }
@@ -842,7 +1488,23 @@ function update() {
     const delta = clock.getDelta();
     const time = Date.now() * 0.005;
 
-    // NEW: Wanted Level Evasion Logic (1 Star)
+    // Render global explosions
+    for (let i = explosions.length - 1; i >= 0; i--) {
+        let exp = explosions[i];
+        exp.life -= delta;
+        if (exp.life <= 0) {
+            scene.remove(exp.mesh);
+            explosions.splice(i, 1);
+        } else {
+            const progress = 1.0 - (exp.life / exp.maxLife);
+            exp.mesh.scale.setScalar(1 + progress * 8); // Expand rapidly
+            exp.mesh.material.opacity = 0.8 * (1.0 - progress); // Fade out
+            // Shift color from bright yellow to smoky red
+            exp.mesh.material.color.lerpColors(new THREE.Color(0xff0000), new THREE.Color(0x222222), progress);
+        }
+    }
+
+    // Wanted Level Evasion Logic (1 Star)
     if (wantedLevel === 1 && wantedTimer > 0 && !playerWasted) {
         wantedTimer -= delta;
         
@@ -857,9 +1519,15 @@ function update() {
             updateWantedLevel(0);
             document.getElementById('star1').style.opacity = '1';
             npcs.forEach(n => { if (n.isCop) n.isChasing = false; }); // Cops drop the chase
+            traffic.forEach(v => { if (v.isCopCar) v.isChasingCar = false; }); // Cars drop the chase
         }
     } else if (wantedLevel === 0) {
         document.getElementById('star1').style.opacity = '1';
+    }
+
+    // Handle Wanted Level Replenishment
+    if (wantedLevel > 0) {
+        assignChasers(); // Constantly replenish foot chasers if one is killed
     }
 
     // Handle Weapon Flash/Recoil
@@ -904,19 +1572,23 @@ function update() {
         }
     } else if (activeCar) {
         // Driving Mode
-        if (!playerWasted) {
-            if (keys.w) carSpeed = Math.min(carSpeed + 0.008, 0.35); 
+        if (!playerWasted && !activeCar.isOnFire && !activeCar.exploded) {
+            // NEW: Drastically Increased Speed Cap
+            if (keys.w) carSpeed = Math.min(carSpeed + 0.008, 0.45); 
             else if (keys.s) carSpeed = Math.max(carSpeed - 0.010, -0.15); 
             else carSpeed *= 0.92; 
 
             if (Math.abs(carSpeed) > 0.05) activeCar.group.rotation.y += (keys.a ? 1 : keys.d ? -1 : 0) * 0.04 * (carSpeed > 0 ? 1 : -1);
         } else {
-            carSpeed *= 0.95; // Roll to a stop if wasted in a car
+            carSpeed *= 0.95; // Roll to a stop if wasted or if car is dead/on fire
         }
 
         const prevPos = activeCar.group.position.clone();
         activeCar.group.position.add(new THREE.Vector3(0, 0, 1).applyQuaternion(activeCar.group.quaternion).multiplyScalar(carSpeed * (delta * 60)));
         
+        // NEW FIX: Constantly sync player coordinates with the car so police know exactly where you are driving!
+        player.group.position.copy(activeCar.group.position);
+
         activeCar.group.updateMatrixWorld();
         const carBox = new THREE.Box3().setFromObject(activeCar.group);
         carBox.expandByVector(new THREE.Vector3(-1.0, 0, -1.0)); 
@@ -927,6 +1599,7 @@ function update() {
         }
         
         if (hitBuilding) {
+            activeCar.takeDamage(Math.abs(carSpeed) * 50); // Rebalanced: Takes ~6 full speed hits to catch fire
             activeCar.group.position.copy(prevPos);
             carSpeed *= -0.5; 
         } else {
@@ -943,6 +1616,11 @@ function update() {
                         } else {
                             v.group.position.x += 0.5; // Safe fallback
                         }
+                        
+                        // NEW: Apply Crash Damage to both cars (Rebalanced)
+                        activeCar.takeDamage(Math.abs(carSpeed) * 30);
+                        v.takeDamage(Math.abs(carSpeed) * 30 + Math.abs(v.currentSpeed) * 30);
+                        
                         carSpeed *= 0.8; 
                     }
                 }
@@ -1054,10 +1732,26 @@ function update() {
                     const diffZ = player.group.position.z - bCenter.z;
                     if (Math.abs(diffX) > Math.abs(diffZ)) player.group.position.x += diffX > 0 ? 0.25 : -0.25;
                     else player.group.position.z += diffZ > 0 ? 0.25 : -0.25;
+                    
+                    // NEW: Cop car ramming player while on foot
+                    if (v.isCopCar && v.hasDriver && wantedLevel >= 2 && !playerWasted && v.currentSpeed > 0.05) {
+                        playerHealth -= 2; // Rapid damage while actively being run over
+                        updateHealth();
+                    }
                 }
             }
 
-            player.group.position.y = 0; 
+            // NEW: Apply Gravity and Jump Physics
+            playerVelocityY -= 0.015 * (delta * 60); 
+            player.group.position.y += playerVelocityY * (delta * 60);
+            if (player.group.position.y <= 0) {
+                player.group.position.y = 0;
+                isGrounded = true;
+                playerVelocityY = 0;
+            } else {
+                isGrounded = false;
+            }
+
             playerNearCar = null;
             for(let v of traffic) {
                 // Allow hijacking/entering BOTH driven cars and empty parked cars
@@ -1065,12 +1759,62 @@ function update() {
                     playerNearCar = v; break; 
                 }
             }
+            // Cannot hijack a car that is exploding
+            if (playerNearCar && playerNearCar.exploded) playerNearCar = null;
+            
             document.getElementById('prompt').classList.toggle('hidden', !playerNearCar);
         } else {
             // Camera behavior when wasted
             camera.position.lerp(player.group.position.clone().add(new THREE.Vector3(-Math.sin(cameraRot)*14, 15, -Math.cos(cameraRot)*14)), 0.05);
             camera.lookAt(player.group.position);
         }
+    } // End of activeCar / On Foot blocks
+
+    // NEW: Car Wash Logic (Location: rx = -120, rz = 160 -> Center = -100, 180)
+    if (activeCar && !activeCar.isCopCar && !activeCar.exploded) {
+        const washDist = activeCar.group.position.distanceTo(new THREE.Vector3(-100, 0, 180));
+        if (washDist < 12 && Math.abs(carSpeed) > 0.01) {
+            if (!activeCar.wasWashed) {
+                activeCar.wasWashed = true;
+                activeCar.health = activeCar.maxHealth; // Repair
+                activeCar.isOnFire = false; // Put out fires!
+                activeCar.fireMesh.visible = false;
+                
+                const newColor = carColors[Math.floor(Math.random() * carColors.length)];
+                activeCar.changeColor(newColor); // Repaint
+                
+                // Remove Stars
+                if (wantedLevel > 0) {
+                    updateWantedLevel(0);
+                    wantedTimer = 0;
+                    npcs.forEach(n => { if (n.isCop) n.isChasing = false; });
+                    traffic.forEach(v => { if (v.isCopCar) v.isChasingCar = false; });
+                }
+                
+                // Allow washing again after driving out and coming back (5s cooldown)
+                setTimeout(() => { if (activeCar) activeCar.wasWashed = false; }, 5000);
+            }
+        }
+    }
+
+    // NEW: Update UI for Car Speed and Health
+    if (activeCar) {
+        document.getElementById('car-ui').classList.remove('hidden');
+        document.getElementById('speed-val').innerText = Math.floor(Math.abs(carSpeed) * 350); 
+        
+        const healthUI = document.getElementById('car-health-ui');
+        if (activeCar.isOnFire) {
+            healthUI.className = "text-xl font-black text-red-500 mt-1 drop-shadow animate-pulse";
+            document.getElementById('car-health-val').innerText = "FIRE! PRESS F";
+        } else if (activeCar.health < 30) {
+            healthUI.className = "text-xl font-bold text-red-500 mt-1 drop-shadow animate-pulse";
+            document.getElementById('car-health-val').innerText = Math.floor(Math.max(activeCar.health, 0)) + "%";
+        } else {
+            healthUI.className = "text-xl font-bold text-orange-400 mt-1 drop-shadow";
+            document.getElementById('car-health-val').innerText = Math.floor(Math.max(activeCar.health, 0)) + "%";
+        }
+    } else {
+        document.getElementById('car-ui').classList.add('hidden');
     }
 
     npcs.forEach(n => {
@@ -1272,6 +2016,12 @@ function update() {
             n.armR.rotation.x = Math.sin(n.walkPhase) * 0.4;
         }
 
+        // NEW: Strictly clamp Prisoners inside the prison compound walls
+        if (n.isPrisoner) {
+            n.group.position.x = Math.max(n.prisonX - 10, Math.min(n.prisonX + 10, n.group.position.x));
+            n.group.position.z = Math.max(n.prisonZ - 10, Math.min(n.prisonZ + 10, n.group.position.z));
+        }
+
         // FIX: The core "NaN Virus" fix. Checks if NPCs are perfectly inside each other.
         for(let other of npcs) {
             if (other !== n && !other.isDead) {
@@ -1306,9 +2056,11 @@ function update() {
             }
         }
 
-        // Expanded boundaries for NPCs wandering
-        if (!n.isCop || wantedLevel === 0) {
-            if (Math.abs(n.group.position.x) > 500 || Math.abs(n.group.position.z) > 500) n.rot += Math.PI;
+        // NEW: Allow NPCs to wander out onto the beach up to the absolute waterline
+        if (Math.abs(n.group.position.x) > 499 || Math.abs(n.group.position.z) > 499) {
+            n.group.position.x = Math.max(-499, Math.min(499, n.group.position.x));
+            n.group.position.z = Math.max(-499, Math.min(499, n.group.position.z));
+            n.rot += Math.PI;
         }
     });
 
