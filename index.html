@@ -781,9 +781,9 @@ class Vehicle {
 
         let blocked = false; let isChasing = (this.isChasingCar && this.hasDriver && wantedLevel >= 2);
         
-        const canEnterBeach = this.isCopter || this.isJeep || this.isTank;
+        const canEnterBeach = this.isCopter || this.isJeep || this.isTank || this.isCopCar || this.isMilitaryFaction;
         const playerInBase = (player.group.position.x > 270 && player.group.position.x < 370 && player.group.position.z > 270 && player.group.position.z < 370);
-        const touchingBasePerimeter = (this.group.position.x > 272 && this.group.position.x < 368 && this.group.position.z > 272 && this.group.position.z < 368);
+        const touchingBasePerimeter = (this.group.position.x > 265 && this.group.position.x < 375 && this.group.position.z > 265 && this.group.position.z < 375);
         this.isWaitingAtBase = (!this.isCopter && !this.isMilitaryFaction && isChasing && playerInBase && touchingBasePerimeter);
         
         if (isChasing) {
@@ -794,16 +794,17 @@ class Vehicle {
             const playerInBeach = Math.abs(player.group.position.x) > 390 || Math.abs(player.group.position.z) > 390;
             const vehicleAtBorder = Math.abs(this.group.position.x) > 380 || Math.abs(this.group.position.z) > 380;
             
-            let shouldDeploy = (flatDist < 15 || (playerInBeach && vehicleAtBorder && distToTarget < 100 && !canEnterBeach));
-            if (playerInBase && !this.isMilitaryFaction) shouldDeploy = false; 
-
+            let shouldDeploy = false;
             if (activeCar) {
-                if (Math.abs(carSpeed) > 0.1) {
-                    shouldDeploy = false; 
-                } else {
-                    shouldDeploy = (flatDist < 15); 
+                if (Math.abs(carSpeed) < 0.1) {
+                    shouldDeploy = (flatDist < 20); 
                 }
+            } else {
+                shouldDeploy = (flatDist < 30);
             }
+
+            if (playerInBeach && vehicleAtBorder && distToTarget < 100 && !canEnterBeach) shouldDeploy = true;
+            if (playerInBase && !this.isMilitaryFaction) shouldDeploy = false; 
 
             if (shouldDeploy && !this.deployed && !this.isCopter) {
                 this.deployed = true; this.hasDriver = false; 
@@ -851,7 +852,8 @@ class Vehicle {
                 }
             }
 
-            if (flatDist < 60 && !this.deployed && !this.isCopter) {
+            // Only Tanks and Copters can shoot while driving
+            if (flatDist < 60 && !this.deployed && (this.isCopter || this.isTank)) {
                 this.shootCooldown -= delta;
                 if (this.shootCooldown <= 0) {
                     this.shootCooldown = 1.0 + Math.random() * 1.5; 
@@ -920,7 +922,7 @@ class Vehicle {
             if (!activeCar && checkBlock(player.group, 10, 0.6, true)) blocked = true;
             if (!blocked) { for(let v of traffic) { if (v !== this && checkBlock(v.group, 16, 0.6, true)) { blocked = true; break; } } }
             if (!blocked && !isChasing) { for(let n of npcs) { if (!n.isDead && checkBlock(n.group, 8, 0.6, true)) { blocked = true; break; } } }
-    }
+        }
     
     if (blocked && !this.occupied && !isChasing) {
         this.stuckTimer = (this.stuckTimer || 0) + delta;
@@ -965,7 +967,13 @@ class Vehicle {
         }
         
         if (!this.isCopter && !this.isMilitaryFaction) {
-            if (this.group.position.x > 279 && this.group.position.x < 361 && this.group.position.z > 279 && this.group.position.z < 361) {
+            // Keep normal cars out of base
+            if (isChasing) {
+                const nextX = this.group.position.x + forward.x * 5; const nextZ = this.group.position.z + forward.z * 5;
+                if (nextX > 270 && nextX < 370 && nextZ > 270 && nextZ < 370) {
+                    this.currentSpeed = 0; this.isWaitingAtBase = true;
+                }
+            } else if (this.group.position.x > 279 && this.group.position.x < 361 && this.group.position.z > 279 && this.group.position.z < 361) {
                 this.health = 0; this.exploded = true; this.vanished = true; this.group.position.y = -100;
                 if (this.isDynamicChaser) { scene.remove(this.group); const idx = traffic.indexOf(this); if (idx > -1) traffic.splice(idx, 1); }
             }
@@ -1078,7 +1086,6 @@ for(let rx of roadCoords) {
 
                 const tank = new Vehicle(320, 320, 'x', -1, 0x4b5320, false, false, false, true); tank.hasDriver = false; tank.homePos = new THREE.Vector3(320, 0, 320); tank.homeRot = -Math.PI/2;
                 const jeep1 = new Vehicle(340, 340, 'x', 1, 0x4b5320, false, false, false, false, true); jeep1.hasDriver = false; jeep1.homePos = new THREE.Vector3(340, 0, 340); jeep1.homeRot = Math.PI/2;
-                const jeep2 = new Vehicle(305, 290, 'x', -1, 0x4b5320, false, false, false, false, true); jeep2.hasDriver = false; jeep2.homePos = new THREE.Vector3(305, 0, 290); jeep2.homeRot = -Math.PI/2;
                 const copter1 = new Vehicle(290, 290, 'z', 1, 0x556b2f, false, false, false, false, false, true); copter1.hasDriver = false; copter1.homePos = new THREE.Vector3(290, 0.06, 290); copter1.homeRot = Math.PI;
                 const hPad = new THREE.Mesh(new THREE.CircleGeometry(6, 16), new THREE.MeshStandardMaterial({color: 0xaaaaaa})); hPad.rotation.x = -Math.PI/2; hPad.position.set(290, 0.06, 290); scene.add(hPad);
             }
@@ -1289,25 +1296,14 @@ function clearWantedState() {
         if (n.isDynamicChaser || n.isBailedDriver || n.isGhost) { scene.remove(n.group); npcs.splice(i, 1); } 
         else if (n.isCop) {
             n.isChasing = false; n.isDead = false; n.attackCooldown = 0; if (n.velocity) n.velocity.set(0,0,0);
-            
+            n.isDynamicChaser = false;
             n.group.rotation.set(0, n.rot || 0, 0);
-            n.group.position.y = 0;
+            if (n.group.position.y > 0.5) n.group.position.y = 0;
             n.legL.rotation.x = 0; n.legR.rotation.x = 0;
             n.armL.rotation.x = 0; n.armR.rotation.x = 0;
             
             if (n.isMilitary) {
                 n.group.position.set(285 + Math.random() * 70, 0, 285 + Math.random() * 70);
-            } else {
-                let spX, spZ; let sValid = false; let att = 0;
-                while(!sValid && att < 30) {
-                    spX = (Math.random()-0.5)*950; spZ = (Math.random()-0.5)*950;
-                    if (!isRestrictedSpawn(spX, spZ) && Math.hypot(spX - player.group.position.x, spZ - player.group.position.z) > 190) {
-                        sValid = true;
-                    }
-                    att++;
-                }
-                if (!sValid) { spX = -1000; spZ = -1000; }
-                n.group.position.set(spX, 0, spZ);
             }
         }
     }
@@ -1637,12 +1633,12 @@ function shootVehicleWeapon() {
 
 function shootWeapon() {
     if (playerWeaponCooldown > 0) return; 
-    playerWeaponCooldown = (playerWeaponType === 'm16') ? 0.08 : 0.3; muzzleTimer = 0.05; 
+    playerWeaponCooldown = (playerWeaponType === 'm16') ? 0.05 : 0.15; muzzleTimer = 0.05; 
     const raycaster = new THREE.Raycaster(); raycaster.setFromCamera(new THREE.Vector2(0, 0), camera); const ray = raycaster.ray;
 
     if (playerWeaponType === 'm16') {
         npcs.forEach(n => {
-            if (!n.isDead && n.group.position.distanceTo(player.group.position) < 15) {
+            if (!n.isDead && n.group.position.distanceTo(player.group.position) < 30) {
                 const dirToNpc = new THREE.Vector3().subVectors(n.group.position, player.group.position).normalize();
                 if (dirToNpc.dot(ray.direction) > 0.8) { 
                     n.isDead = true;
@@ -1693,7 +1689,7 @@ function shootWeapon() {
         else if (wantedLevel === 0) updateWantedLevel(1); else updateWantedLevel(wantedLevel); 
         if (!hitTarget.velocity) hitTarget.velocity = new THREE.Vector3(); hitTarget.velocity.copy(ray.direction).normalize().multiplyScalar(0.4); hitTarget.velocity.y = 0.5; 
     } else if (hitType === 'car') {
-        const dmg = (playerWeaponType === 'm16') ? 40 : 25; 
+        const dmg = (playerWeaponType === 'm16') ? 80 : 40; 
         hitTarget.takeDamage(dmg, true); 
         if (hitTarget.isCopCar && hitTarget.hasDriver && wantedLevel === 0) updateWantedLevel(1);
     }
@@ -1794,11 +1790,9 @@ function update() {
             npcs.forEach(n => {
                 if (!n.isDead && (n.isChasing || n.isAngryDriver || n.isGhost)) {
                     let distToPlayer = n.group.position.distanceTo(player.group.position);
-                    
                     let isShooter = false;
                     if (n.isCop && wantedLevel >= 2) isShooter = true;
                     if (n.isMilitary && n.isChasing) isShooter = true; 
-                    
                     let threatZone = isShooter ? 30 : 4.5;
                     
                     if (distToPlayer < threatZone) {
@@ -1825,26 +1819,29 @@ function update() {
                     const tPos = bestTarget.type === 'npc' ? bestTarget.obj.group.position : bestTarget.obj.group.position;
                     girlfriend.group.rotation.y = Math.atan2(tPos.x - gfPos.x, tPos.z - gfPos.z);
                     
-                    // Natural 1-handed shooting posture
                     girlfriend.armR.rotation.z = 0.05; 
                     girlfriend.armL.rotation.z = 0; 
                     girlfriend.armR.rotation.x = -Math.PI/2 + 0.1; 
                 }
                 
                 if (bestTarget.type === 'npc') {
-                    bestTarget.obj.isDead = true; 
-                    if (!bestTarget.obj.velocity) bestTarget.obj.velocity = new THREE.Vector3();
-                    
-                    // Lethal physics (No melting or freezing - they get knocked backwards naturally)
-                    let knockDir = new THREE.Vector3().subVectors(bestTarget.obj.group.position, gfPos).normalize();
-                    bestTarget.obj.velocity.copy(knockDir).multiplyScalar(0.6);
-                    bestTarget.obj.velocity.y = 0.6; 
-                    if(bestTarget.obj.isChasing) bestTarget.obj.isChasing = false;
-                    
-                    // Visual spark to confirm bullet hit
-                    const spark = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 0.2), new THREE.MeshBasicMaterial({color: 0xffff00}));
-                    spark.position.copy(bestTarget.obj.group.position).add(new THREE.Vector3(0, 1.2, 0));
-                    scene.add(spark); explosions.push({ mesh: spark, life: 0.1, maxLife: 0.1 });
+                    if (Math.random() < 0.35) { // Natural 35% accuracy
+                        bestTarget.obj.isDead = true; 
+                        if (!bestTarget.obj.velocity) bestTarget.obj.velocity = new THREE.Vector3();
+                        let knockDir = new THREE.Vector3().subVectors(bestTarget.obj.group.position, gfPos).normalize();
+                        bestTarget.obj.velocity.copy(knockDir).multiplyScalar(0.6);
+                        bestTarget.obj.velocity.y = 0.6; 
+                        if(bestTarget.obj.isChasing) bestTarget.obj.isChasing = false;
+                        
+                        const spark = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 0.2), new THREE.MeshBasicMaterial({color: 0xffff00}));
+                        spark.position.copy(bestTarget.obj.group.position).add(new THREE.Vector3(0, 1.2, 0));
+                        scene.add(spark); explosions.push({ mesh: spark, life: 0.1, maxLife: 0.1 });
+                    } else {
+                        // Missed shot spark
+                        const spark = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 0.2), new THREE.MeshBasicMaterial({color: 0xaaaaaa}));
+                        spark.position.copy(bestTarget.obj.group.position).add(new THREE.Vector3((Math.random()-0.5)*2, 0.1, (Math.random()-0.5)*2));
+                        scene.add(spark); explosions.push({ mesh: spark, life: 0.1, maxLife: 0.1 });
+                    }
 
                 } else if (bestTarget.type === 'car') {
                     bestTarget.obj.takeDamage(20, true);
@@ -1877,19 +1874,19 @@ function update() {
         stashGlow.scale.setScalar(1 + Math.sin(time*10)*0.1);
         if (player.group.position.distanceTo(stashGroup.position) < 3 && !playerWasted) {
             warehouseEventCompleted = true; stashGroup.visible = false;
-            playerHealth = 300; updateHealth(); playerWeaponType = 'm16';
-            if (player.isArmed) { player.m16.mesh.visible = true; player.pistol.mesh.visible = false; }
             
             const prompt = document.getElementById('prompt'); prompt.classList.remove('hidden');
-            prompt.innerHTML = '<span class="text-red-600 font-black text-2xl animate-pulse drop-shadow-[0_0_10px_#ff0000]">AMBUSH! M16 EQUIPPED!</span>';
+            prompt.innerHTML = '<span class="text-red-600 font-black text-2xl animate-pulse drop-shadow-[0_0_10px_#ff0000]">GHOST AMBUSH!</span>';
             setTimeout(() => { prompt.classList.add('hidden'); }, 4000);
             
             for(let i=0; i<7; i++) {
                 const ghost = createHuman({ isFemale: Math.random() > 0.5, shirt: 0x111111, pants: 0x111111, skin: 0xdddddd, hair: 0x555555, weaponType: 'baton' });
                 ghost.group.position.set(-440 + (Math.random()-0.5)*8, 0, 452 + (Math.random()-0.5)*4); scene.add(ghost.group);
-                npcs.push({ ...ghost, walkPhase: 0, rot: Math.PI, isCop: true, isMilitary: false, isChasing: true, isGhost: true });
+                npcs.push({ ...ghost, walkPhase: 0, rot: Math.PI, isCop: false, isMilitary: false, isChasing: true, isGhost: true });
             }
         }
+    } else if (player.group.position.distanceTo(stashGroup.position) > 100) {
+        warehouseEventCompleted = false; stashGroup.visible = true;
     }
 
     if (playerWeaponCooldown > 0) playerWeaponCooldown -= delta;
@@ -2222,7 +2219,14 @@ function update() {
         if (n.isDead) {
             if (n.group.position.y > 0 || (n.velocity && n.velocity.lengthSq() > 0)) {
                 n.group.position.add(n.velocity); n.velocity.y -= 0.05; n.group.rotation.x += 0.2; n.group.rotation.z += 0.3;
-                if (n.group.position.y <= 0) { n.group.position.y = 0; n.velocity.set(0,0,0); n.group.rotation.set(Math.PI / 2, n.rot, 0); }
+                if (n.group.position.y <= 0) { 
+                    n.group.position.y = 0; n.velocity.set(0,0,0); 
+                    n.group.rotation.set(Math.PI / 2, n.rot, 0); 
+                }
+            } else if (n.isGhost) {
+                n.group.rotation.set(Math.PI / 2, n.rot, 0);
+                n.vanishTimer = (n.vanishTimer || 0) + delta;
+                if (n.vanishTimer > 2) { scene.remove(n.group); n.toBeRemoved = true; }
             } else if (n.recoverTimer > 0) {
                 n.recoverTimer -= delta; if (n.recoverTimer <= 0) { n.isDead = false; n.group.rotation.set(0, 0, 0); }
             }
@@ -2239,9 +2243,9 @@ function update() {
 
         if (!n.isMilitary && !n.isGhost) {
             const nextX = n.group.position.x + Math.sin(n.rot) * 5; const nextZ = n.group.position.z + Math.cos(n.rot) * 5;
-            if (nextX > 276 && nextX < 364 && nextZ > 276 && nextZ < 364) {
+            if (nextX > 272 && nextX < 368 && nextZ > 272 && nextZ < 368) {
                 n.rot += Math.PI; 
-                if (n.isChasing) n.isChasing = false; 
+                if (n.isChasing) n.rot = Math.atan2(player.group.position.x - n.group.position.x, player.group.position.z - n.group.position.z) + Math.PI; 
             }
         }
 
@@ -2505,6 +2509,10 @@ function update() {
             n.rot += Math.PI;
         }
     });
+
+    for (let i = npcs.length - 1; i >= 0; i--) {
+        if (npcs[i].toBeRemoved) npcs.splice(i, 1);
+    }
 
     traffic.forEach(v => {
         if (!v.isCopter) {
